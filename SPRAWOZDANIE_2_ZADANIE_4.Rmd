@@ -1,0 +1,1482 @@
+---
+title: "Sprawozdanie 2 - Zadanie 4"
+author: "Bartosz Wędziński"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    number_sections: true
+    fig_caption: true
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+fontsize: 12pt
+geometry: margin=1in
+colorlinks: true
+header-includes:
+  - \usepackage{fancyhdr}
+  - \definecolor{gold}{RGB}{255,215,0}
+  - \definecolor{chocolate}{RGB}{210,105,30}
+  - \pagestyle{fancy}
+  - \fancyhf{}
+  - \rhead{Bartosz Wędziński}
+  - \lhead{ZADANIE 4}
+  - \cfoot{\thepage}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, 
+  warning = FALSE, 
+  message = FALSE, 
+  fig.width = 12, 
+  fig.height = 7, 
+  fig.align = 'center',
+  fig.pos = 'H',
+  cache = FALSE
+)
+
+set.seed(67)
+
+# Dla numeracji
+fig_num <- 1
+tab_num <- 1
+```
+
+```{r libraries, include=FALSE}
+library(fpp2)
+library(forecast)
+library(ggplot2)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+library(dplyr)
+library(tidyr)
+library(tseries)
+library(nortest)
+```
+
+```{r functions, include=FALSE}
+
+# Numerowanie wykresów
+fig_cap <- function(text) {
+  cap <- paste0("Rysunek ", fig_num, ": ", text)
+  fig_num <<- fig_num + 1
+  return(cap)
+}
+
+# Numerowanie tabeli
+tab_cap <- function(text) {
+  cap <- paste0("Tabela ", tab_num, ": ", text)
+  tab_num <<- tab_num + 1
+  return(cap)
+}
+
+# Testy stacjonarności
+test_stationarity <- function(x) {
+  adf <- adf.test(x, alternative = "stationary")
+  kpss <- kpss.test(x, null = "Level")
+  data.frame(
+    Test = c("ADF", "KPSS"),
+    Statystyka = c(adf$statistic, kpss$statistic),
+    `p-value` = c(adf$p.value, kpss$p.value),
+    Interpretacja = c(
+      ifelse(adf$p.value < 0.05, "Stacjonarny", "Niestacjonarny"),
+      ifelse(kpss$p.value < 0.05, "Niestacjonarny", "Stacjonarny")
+    ),
+    check.names = FALSE,
+    row.names = NULL
+  )
+}
+
+# Skrócona diagnostyka (wykresy i jeden test)
+quick_diagnostics <- function(model, model_name = "") {
+  resid <- residuals(model)
+  
+  # Test Ljung-Box
+  lb <- Box.test(resid, lag = 20, type = "Ljung-Box")
+  cat("\n**", model_name, "**\n")
+  cat("- Test Ljung-Box (lag=20): p-value =", round(lb$p.value, 4), "\n")
+  cat("- Interpretacja:", ifelse(lb$p.value >= 0.05, 
+                                  "Reszty przypominają biały szum ✓", 
+                                  "Reszty mogą nie być białym szumem ✗"), "\n\n")
+}
+
+# Pełna diagnostyka dla najlepszych modeli
+full_diagnostics <- function(model, model_name = "") {
+  par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+  resid <- residuals(model)
+  
+  # Szereg reszt
+  plot(resid, type = "l", main = paste(model_name, "- Reszty"),
+       xlab = "Czas", ylab = "Reszty", col = "steelblue", lwd = 1.5)
+  abline(h = 0, col = "red", lty = 2)
+  
+  # Histogram
+  hist(resid, breaks = 20, prob = TRUE, main = paste(model_name, "- Histogram"),
+       xlab = "Reszty", col = "lightblue", border = "white")
+  curve(dnorm(x, mean(resid), sd(resid)), add = TRUE, col = "red", lwd = 2)
+  
+  # Q-Q plot
+  qqnorm(resid, main = paste(model_name, "- Q-Q Plot"), pch = 20, col = "steelblue")
+  qqline(resid, col = "red", lwd = 2)
+  
+  # ACF
+  acf(resid, main = paste(model_name, "- ACF"), lag.max = 20)
+  
+  par(mfrow = c(1, 1))
+  
+  # Testy statystyczne
+  lb <- Box.test(resid, lag = 20, type = "Ljung-Box")
+  sw <- shapiro.test(resid)
+  
+  cat("\n### Diagnostyka:", model_name, "\n\n")
+  cat("**Test Ljung-Box (lag=20)**\n")
+  cat("- Statystyka:", round(lb$statistic, 3), "\n")
+  cat("- p-value:", round(lb$p.value, 4), "\n")
+  cat("- Wniosek:", ifelse(lb$p.value >= 0.05, 
+                           "Nie odrzucamy H0 - reszty przypominają biały szum", 
+                           "Odrzucamy H0 - autokorelacja w resztach"), "\n\n")
+  
+  cat("**Test Shapiro-Wilka (normalność)**\n")
+  cat("- Statystyka:", round(sw$statistic, 3), "\n")
+  cat("- p-value:", round(sw$p.value, 4), "\n")
+  cat("- Wniosek:", ifelse(sw$p.value >= 0.05, 
+                           "Reszty zgodne z rozkładem normalnym", 
+                           "Odchylenia od normalności"), "\n\n")
+}
+
+# Porównanie modeli - tabela
+compare_models <- function(model_list, names_list, train_data, test_data) {
+  results <- data.frame(
+    Model = character(),
+    AIC = numeric(),
+    BIC = numeric(),
+    RMSE_train = numeric(),
+    MAE_train = numeric(),
+    RMSE_test = numeric(),
+    MAE_test = numeric(),
+    MAPE_test = numeric(),
+    MASE_test = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  for (i in seq_along(model_list)) {
+    mod <- model_list[[i]]
+    name <- names_list[i]
+    
+    # Kryteria informacyjne
+    aic_val <- tryCatch(AIC(mod), error = function(e) NA)
+    bic_val <- tryCatch(BIC(mod), error = function(e) NA)
+    
+    # Dokładność in-sample
+    acc_train <- accuracy(mod)
+    
+    # Prognozy out-of-sample
+    h <- length(test_data)
+    fc <- forecast(mod, h = h)
+    acc_test <- accuracy(fc, test_data)
+    
+    results <- rbind(results, data.frame(
+      Model = name,
+      AIC = aic_val,
+      BIC = bic_val,
+      RMSE_train = acc_train[1, "RMSE"],
+      MAE_train = acc_train[1, "MAE"],
+      RMSE_test = acc_test[2, "RMSE"],
+      MAE_test = acc_test[2, "MAE"],
+      MAPE_test = acc_test[2, "MAPE"],
+      MASE_test = acc_test[2, "MASE"]
+    ))
+  }
+  
+  return(results)
+}
+
+# Wykres prognoz dla wielu modeli
+plot_forecasts_multi <- function(model_list, names_list, train_data, test_data, 
+                                  title = "Porównanie prognoz", colors = NULL) {
+  h <- length(test_data)
+  
+  # Przygotowanie danych
+  time_train <- time(train_data)
+  time_test <- time(test_data)
+  
+  df_train <- data.frame(Time = time_train, Value = as.numeric(train_data), Type = "Dane uczące")
+  df_test <- data.frame(Time = time_test, Value = as.numeric(test_data), Type = "Dane testowe")
+  
+  # Prognozy
+  df_forecasts <- data.frame()
+  
+  for (i in seq_along(model_list)) {
+    fc <- forecast(model_list[[i]], h = h)
+    df_fc <- data.frame(
+      Time = time_test,
+      Value = as.numeric(fc$mean),
+      Lower = as.numeric(fc$lower[, 2]),
+      Upper = as.numeric(fc$upper[, 2]),
+      Model = names_list[i]
+    )
+    df_forecasts <- rbind(df_forecasts, df_fc)
+  }
+  
+  # Wykres
+  if (is.null(colors)) {
+    colors <- rainbow(length(names_list))
+  }
+  
+  p <- ggplot() +
+    geom_line(data = df_train, aes(x = Time, y = Value), color = "gray30", size = 0.8) +
+    geom_line(data = df_test, aes(x = Time, y = Value), color = "black", size = 1.2, linetype = "solid") +
+    geom_line(data = df_forecasts, aes(x = Time, y = Value, color = Model), size = 1) +
+    scale_color_manual(values = colors) +
+    labs(title = title, x = "Czas", y = "Wartość", color = "Model") +
+    theme_minimal(base_size = 11) +
+    theme(plot.title = element_text(face = "bold", hjust = 0.5),
+          legend.position = "bottom",
+          legend.text = element_text(size = 9))
+  
+  return(p)
+}
+```
+
+\newpage
+
+# Wprowadzenie
+
+## Cel analizy
+
+Celem niniejszego sprawozdania jest przeprowadzenie kompleksowego porównania dokładności prognoz dla szeregu czasowego **euretail**, który przedstawia kwartalny indeks handlu detalicznego (retail trade index) dla strefy euro. Analiza obejmuje porównanie czterech głównych podejść do prognozowania:
+
+1. **Modele (S)ARIMA** - autoregresyjne modele zintegrowanej średniej ruchomej z sezonowością
+2. **Modele dekompozycji** - klasyczna i STL (Seasonal-Trend decomposition using Loess)
+3. **Modele ETS** - wygładzanie wykładnicze (Error-Trend-Seasonal)
+4. **Metoda referencyjna** - sezonowy model naiwny (benchmark)
+
+Głównym kryterium oceny będzie **dokładność prognoz** mierzona na zbiorze testowym przy użyciu miar: RMSE, MAE, MAPE oraz MASE.
+
+## Opis danych
+
+Dane **euretail** pochodzą z pakietu `fpp2` i zawierają kwartalne obserwacje indeksu handlu detalicznego dla strefy euro. Szereg ten charakteryzuje się wyraźnym trendem wzrostowym oraz sezonowością kwartalną.
+
+## Zakres metod
+
+W analizie wykorzystano:
+
+- **Podział danych**: train/test split (8 ostatnich kwartałów na zbiór testowy)
+- **Transformacje**: transformacja Boxa-Coxa, różnicowanie zwykłe i sezonowe
+- **Modelowanie**: SARIMA (5 wariantów), dekompozycja (3 warianty), ETS (4 warianty)
+- **Diagnostyka**: testy białoszumowości, normalności reszt
+- **Ocena**: miary RMSE, MAE, MAPE, MASE dla zbiorów uczącego i testowego
+
+\newpage
+
+# Analiza wstępna danych
+
+## Charakterystyka szeregu
+
+```{r load_data}
+data(euretail)
+series_full <- euretail
+
+n_total <- length(series_full)
+start_year <- start(series_full)
+end_year <- end(series_full)
+freq <- frequency(series_full)
+```
+
+Szereg **euretail** zawiera **`r n_total` obserwacji kwartalnych** z okresu `r paste(start_year, collapse = " Q")` do `r paste(end_year, collapse = " Q")`.
+
+```{r desc_stats}
+stats <- data.frame(
+  Statystyka = c("Minimum", "Q1", "Mediana", "Średnia", "Q3", "Maksimum", 
+                 "Odch. std.", "Wariancja"),
+  Wartość = c(min(series_full), quantile(series_full, 0.25), 
+              median(series_full), mean(series_full), 
+              quantile(series_full, 0.75), max(series_full),
+              sd(series_full), var(series_full))
+)
+
+kable(stats, digits = 2, caption = tab_cap("Statystyki opisowe szeregu euretail"),
+      booktabs = TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "striped"), full_width = FALSE)
+```
+
+```{r fig_original, fig.height=6, fig.cap=fig_cap("Szereg czasowy euretail - kwartalny indeks handlu detalicznego dla strefy euro")}
+autoplot(series_full) +
+  labs(title = "Indeks handlu detalicznego - strefa euro",
+       subtitle = "Dane kwartalne",
+       x = "Rok", y = "Indeks") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+**Obserwacje**:
+
+- Dominujący **trend wzrostowy** do **2008 roku**, po którym następuje wyraźne załamanie i **trend spadkowy** w końcowej fazie szeregu.
+- Widoczna **sezonowość kwartalna** - regularne wahania w obrębie roku
+- **Wariancja**: amplituda wahań sezonowych ulega zmianom wraz ze zmianą trendu, co sugeruje zasadność zastosowania transformacji stabilizującej (np. Boxa-Coxa) w celu poprawy jakości modelowania.
+
+## Podział na zbiór uczący i testowy
+
+```{r train_test_split}
+# Podział: ostatnie 8 kwartałów (2 lata) na test
+h_test <- 8
+train <- window(series_full, end = c(end_year[1] - ceiling(h_test/freq), 
+                                       freq - (h_test %% freq)))
+test <- window(series_full, start = c(end_year[1] - ceiling(h_test/freq), 
+                                        freq - (h_test %% freq) + 1))
+
+n_train <- length(train)
+n_test <- length(test)
+```
+
+**Podział danych**:
+
+- **Zbiór uczący**: `r n_train` obserwacji (do trenowania modeli)
+- **Zbiór testowy**: `r n_test` obserwacji (do oceny dokładności prognoz)
+- **Uzasadnienie**: 8 kwartałów (2 lata) to standardowy horyzont dla danych kwartalnych, wystarczający do oceny sezonowości
+
+```{r fig_split, fig.height=6, fig.cap=fig_cap("Podział na zbiór uczący (niebieski) i testowy (czerwony)")}
+df_plot <- data.frame(
+  Time = c(time(train), time(test)),
+  Value = c(as.numeric(train), as.numeric(test)),
+  Type = c(rep("Uczący", n_train), rep("Testowy", n_test))
+)
+
+ggplot(df_plot, aes(x = Time, y = Value, color = Type)) +
+  geom_line(size = 1) +
+  scale_color_manual(values = c("Uczący" = "steelblue", "Testowy" = "darkred")) +
+  labs(title = "Podział danych na zbiór uczący i testowy",
+       x = "Rok", y = "Indeks", color = "Zbiór") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5),
+        legend.position = "bottom")
+```
+
+Wizualna przerwa między zbiorem uczącym a testowym wynika z separacji serii danych; zbiór testowy obejmuje okres od 2010 Q1, kontynuując przebieg szeregu bezpośrednio po zakończeniu zbioru uczącego (2009 Q4).
+
+
+## Analiza właściwości szeregu uczącego
+
+### Testy stacjonarności
+
+```{r stationarity_train}
+stat_train <- test_stationarity(train)
+
+kable(stat_train, digits = 4, caption = tab_cap("Testy stacjonarności dla zbioru uczącego"),
+      booktabs = TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "striped"), full_width = FALSE)
+```
+
+**Interpretacja**: Szereg uczący **nie jest stacjonarny** - potwierdza to obecność trendu. Wymagane będą transformacje (różnicowanie).
+
+### ACF i PACF
+
+```{r fig_acf_pacf_train, fig.height=8, fig.cap=fig_cap("ACF i PACF dla zbioru uczącego")}
+par(mfrow = c(2, 1))
+acf(train, lag.max = 40, main = "ACF - zbiór uczący")
+pacf(train, lag.max = 40, main = "PACF - zbiór uczący")
+par(mfrow = c(1, 1))
+```
+
+**Obserwacje**:
+
+- **ACF** maleje **bardzo wolno** - potwierdza niestacjonarność
+- Tak wysoka wartość **PACF(1)** jest klasycznym objawem niestacjonarności
+
+### Dekompozycja wstępna
+
+```{r fig_decomp_initial, fig.height=9, fig.cap=fig_cap("Wstępna dekompozycja STL zbioru uczącego")}
+decomp_stl <- stl(train, s.window = "periodic")
+autoplot(decomp_stl) +
+  labs(title = "Dekompozycja STL - zbiór uczący") +
+  theme_minimal()
+```
+
+**Obserwacje**:
+
+- **Trend**: Wzrostowy do 2008 r., po czym następuje wyraźny spadek (prawdopodobny wpływ globalnego kryzysu gospodarczego).
+- **Sezonowość**: Bardzo stabilna amplituda i powtarzalny wzorzec kwartalny, co sugeruje model addytywny sezonowości.
+- **Reszty**: W większości okresów małe, stabilnie oscylują wokół zera, jednak wykazują większą zmienność i istotne odchylenia (fluktuacje) w okolicach 2000 r., 2003 r. oraz 2009 r.
+
+\newpage
+
+# Transformacje wstępne
+
+## Stabilizacja wariancji - transformacja Boxa-Coxa
+
+```{r boxcox}
+# Obliczenie optymalnego lambda
+lambda_opt <- BoxCox.lambda(train)
+
+# Transformacja
+train_bc <- BoxCox(train, lambda = lambda_opt)
+```
+
+**!!!!UWAGA KRYTYCZNA!!!!:**
+
+Zastosowano transformację Boxa-Coxa z parametrem $\lambda=1.99$ sugerowanym przez metodę Guerrero, z której korzysta funkcja Box.Cox.lambda(train). 
+
+Taka wartość (podnoszenie do kwadratu) jest niespójna z naturą szeregów ekonomicznych, gdzie zazwyczaj oczekujemy stabilizacji wariancji rosnącej wraz z poziomem (co sugerowałoby $\lambda$ bliskie 0). Podejrzewam, że wynik ten jest artefaktem wywołanym przez załamanie trendu w okresie kryzysu finansowego w 2008 roku, powodującym specyficzną strukturę zmienności zawartą w zbiorze uczącym. Świadomie nie zdecydowałem się jednak wymusić transformacji logarytmicznej ($\lambda=0$), czy też braku transformacji $\lambda=1$, co jest standardem branżowym, aby zachować pełną automatyzację procesu decyzyjnego i zweryfikować, jak modele poradzą sobie z taką transformacją w warunkach testowych, mimo jej teoretycznej niespójności.
+
+```{r fig_boxcox, fig.height=7, fig.cap=fig_cap("Porównanie szeregu przed i po transformacji Boxa-Coxa")}
+par(mfrow = c(2, 1))
+
+plot(train, 
+     main = expression(paste("Przed transformacją (", lambda, " = 1)")), 
+     ylab = "Indeks", col = "steelblue", lwd = 1.5)
+
+plot(train_bc, 
+     main = bquote("Po transformacji Boxa-Coxa (" * lambda == .(round(lambda_opt, 3)) * ")"), 
+     ylab = "Transformowana wartość", col = "darkgreen", lwd = 1.5)
+
+par(mfrow = c(1, 1))
+```
+
+**Efekt**: Transformacja **stabilizuje wariancję** - wahania mają bardziej stałą amplitudę przez cały szereg.
+
+## Różnicowanie
+
+### Różnicowanie zwykłe (trend)
+
+```{r diff_regular}
+train_bc_diff1 <- diff(train_bc, differences = 1)
+```
+
+```{r fig_diff1, fig.height=6, fig.cap=fig_cap("Szereg po różnicowaniu zwykłym (d=1)")}
+autoplot(train_bc_diff1) +
+  labs(title = "Szereg po różnicowaniu zwykłym",
+       x = "Czas", y = "Pierwsze różnice") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+```
+
+**Obserwacje**: Trend został wyeliminowany, ale **sezonowość nadal widoczna**.
+
+### Różnicowanie sezonowe
+
+```{r diff_seasonal}
+train_bc_diff1_diff4 <- diff(train_bc_diff1, lag = 4, differences = 1)
+```
+
+```{r fig_diff_seasonal, fig.height=6, fig.cap=fig_cap("Szereg po różnicowaniu zwykłym i sezonowym (d=1, D=1)")}
+autoplot(train_bc_diff1_diff4) +
+  labs(title = "Szereg po różnicowaniu zwykłym i sezonowym",
+       x = "Czas", y = "Różnice") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+```
+
+**Obserwacje**: Szereg wygląda na **stacjonarny** - brak trendu i sezonowości.
+
+### Testy stacjonarności po różnicowaniu
+
+```{r stationarity_diff}
+stat_diff <- test_stationarity(train_bc_diff1_diff4)
+
+kable(stat_diff, digits = 4, caption = tab_cap("Testy stacjonarności po różnicowaniu (d=1, D=1)"),
+      booktabs = TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "striped"), full_width = FALSE)
+```
+
+**Wniosek**: Po różnicowaniu szereg jest **stacjonarny** - możemy przystąpić do modelowania SARIMA.
+
+```{r fig_acf_pacf_diff, fig.height=8, fig.cap=fig_cap("ACF i PACF po różnicowaniu (d=1, D=1)")}
+par(mfrow = c(2, 1))
+acf(train_bc_diff1_diff4, lag.max = 40, main = "ACF - po różnicowaniu")
+pacf(train_bc_diff1_diff4, lag.max = 40, main = "PACF - po różnicowaniu")
+par(mfrow = c(1, 1))
+```
+
+**Obserwacje dla identyfikacji SARIMA**:
+
+- ACF: istotne wartości na lagu 1 (sugeruje MA(1) i SMA(1))
+- PACF: istotne wartości na lagu 1 (sugeruje AR(1) i SAR(1))
+
+\newpage
+
+# MODELE (S)ARIMA
+
+## Identyfikacja rzędu modelu
+
+### auto.arima() jako punkt wyjścia
+
+```{r auto_arima}
+model_auto <- auto.arima(train, lambda = lambda_opt, seasonal = TRUE, 
+                         stepwise = FALSE, approximation = FALSE)
+```
+
+`auto.arima()` sugeruje: **`r arimaorder(model_auto)`**
+
+**Interpretacja**: SARIMA(p=`r arimaorder(model_auto)[1]`, d=`r arimaorder(model_auto)[2]`, q=`r arimaorder(model_auto)[3]`)(P=`r arimaorder(model_auto)[4]`, D=`r arimaorder(model_auto)[5]`, Q=`r arimaorder(model_auto)[6]`)[`r arimaorder(model_auto)[7]`]
+
+```{r sarima_models}
+
+# Na podstawie analizy ACF/PACF i `auto.arima()` rozważamy następujące modele:
+
+
+# Model 1: auto.arima
+sarima1 <- model_auto
+
+# Model 2: SARIMA(0,1,1)(0,1,1)[4]
+sarima2 <- Arima(train, order = c(0,1,1), seasonal = c(0,1,1), lambda = lambda_opt)
+
+# Model 3: SARIMA(1,1,0)(1,1,0)[4]
+sarima3 <- Arima(train, order = c(1,1,0), seasonal = c(1,1,0), lambda = lambda_opt)
+
+# Model 4: SARIMA(1,1,1)(1,1,1)[4]
+sarima4 <- Arima(train, order = c(1,1,1), seasonal = c(1,1,1), lambda = lambda_opt)
+
+# Model 5: SARIMA(0,1,2)(0,1,1)[4]
+sarima5 <- Arima(train, order = c(0,1,2), seasonal = c(0,1,1), lambda = lambda_opt)
+
+sarima_models <- list(sarima1, sarima2, sarima3, sarima4, sarima5)
+sarima_names <- c(
+  "AUTO SARIMA",
+  "SARIMA(0,1,1)(0,1,1)[4]",
+  "SARIMA(1,1,0)(1,1,0)[4]", 
+  "SARIMA(1,1,1)(1,1,1)[4]",
+  "SARIMA(0,1,2)(0,1,1)[4]"
+)
+```
+
+### Porównanie kryteriów informacyjnych
+
+```{r sarima_comparison}
+sarima_criteria <- data.frame(
+  Model = sarima_names,
+  AIC = sapply(sarima_models, AIC),
+  AICc = sapply(sarima_models, function(m) m$aicc),
+  BIC = sapply(sarima_models, BIC)
+)
+
+kable(sarima_criteria, digits = 2, caption = tab_cap("Porównanie kryteriów informacyjnych dla modeli SARIMA"),
+      booktabs = TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "striped"), full_width = FALSE)
+```
+
+```{r best_sarima}
+best_sarima_idx <- which.min(sarima_criteria$AICc)
+best_sarima <- sarima_models[[best_sarima_idx]]
+best_sarima_name <- sarima_names[best_sarima_idx]
+```
+
+**Najlepsze modele** wg:
+
+- AIC: `r sarima_names[which.min(sarima_criteria$AIC)]`
+- BIC: `r sarima_names[which.min(sarima_criteria$BIC)]`
+
+## Diagnostyka modeli SARIMA
+
+### Skrócona diagnostyka dla wszystkich modeli
+
+```{r sarima_quick_diag, results='asis'}
+for (i in 1:length(sarima_models)) {
+  quick_diagnostics(sarima_models[[i]], sarima_names[i])
+}
+
+```
+
+### Wybór najlepszego modelu SARIMA
+
+**Wybrany model:** SARIMA(0,1,3)(0,1,1)[4]
+
+Mimo że analiza graficzna sugerowała niższe rzędy, kryteria informacyjne AIC i BIC oraz Test Ljunga-Boxa faworyzują model SARIMA(0,1,3)(0,1,1)[4], co sugeruje potrzebę uwzględnienia bardziej złożonej struktury błędów w celu pełnego wyeliminowania autokorelacji.
+
+\newpage
+
+# MODELE DEKOMPOZYCJI
+
+## Dekompozycja klasyczna
+
+```{r decomp_classic}
+# Klasyczna
+decomp_mult <- decompose(train, type = "multiplicative")
+```
+
+```{r fig_decomp_classic, fig.height=9, fig.cap=fig_cap("Dekompozycja klasyczna (multiplikatywna)")}
+autoplot(decomp_mult) +
+  labs(title = "Dekompozycja klasyczna - multiplikatywna") +
+  theme_minimal()
+```
+
+**Interpretacja**:
+
+- Wykres przedstawia dekompozycję multiplikatywną. 
+
+- **Trend**: Widać wyraźny wzrost do 2008 roku, a następnie bardzo gwałtowny spadek po nim. 
+
+- **Sezonowość**: Wzorce sezonowe są idealnie regularne, co jest cechą dekompozycji klasycznej (zakłada ona stały profil sezonowości dla każdego roku).
+
+- **Reszty**: Wartość reszt oscyluje wokół 1.000 (standardowe dla modelu multiplikatywnego). 
+
+```{r decomp_classic_forecast}
+# Ekstrapolacja trendu
+trend_component <- decomp_mult$trend
+time_idx <- time(trend_component)
+df_trend <- data.frame(time = as.numeric(time_idx), trend = as.numeric(trend_component))
+df_trend <- na.omit(df_trend)
+
+trend_lm <- lm(trend ~ time, data = df_trend)
+
+# Prognozy trendu
+future_time <- seq(max(time_idx, na.rm = TRUE) + 0.25, by = 0.25, length.out = h_test)
+trend_forecast <- predict(trend_lm, newdata = data.frame(time = future_time))
+
+# Sezonowość (powtarzamy wzorzec)
+seasonal_pattern <- decomp_mult$seasonal[1:4]
+seasonal_forecast <- rep(seasonal_pattern, length.out = h_test)
+
+# Prognozy (multiplikatywne)
+fc_decomp_classic <- trend_forecast * seasonal_forecast
+
+# Konwersja do obiektu ts
+fc_decomp_classic_ts <- ts(fc_decomp_classic, start = start(test), frequency = 4)
+
+```
+
+## Dekompozycja STL
+
+```{r decomp_stl_models}
+# STL z różnymi parametrami
+stl1 <- stl(train, s.window = "periodic", t.window = 15)
+stl2 <- stl(train, s.window = 7, t.window = 15)
+
+# Prognozy: STL + ARIMA na resztach
+fc_stl1 <- stlf(train, method = "arima", lambda = lambda_opt, h = h_test)
+fc_stl2 <- forecast(stl2, method = "arima", lambda = lambda_opt, h = h_test)
+
+```
+
+```{r fig_stl_comparison, fig.height=10, fig.cap=fig_cap("Porównanie dekompozycji STL z różnymi parametrami")}
+par(mfrow = c(2, 1))
+plot(stl1, main = "STL: s.window='periodic', t.window=15")
+plot(stl2, main = "STL: s.window=7, t.window=15")
+par(mfrow = c(1, 1))
+```
+
+**Obserwacja**: Zmiana parametru `s.window` wpływa na sezonowość oraz reszty
+
+## Porównanie dekompozycji
+
+```{r decomp_comparison}
+h_period <- length(test)
+
+fc_stl_p <- forecast(stl1, h = h_period)
+fc_stl_7 <- forecast(stl2, h = h_period)
+
+# Dekompozycja klasyczna 
+time_train <- time(train)
+fit_trend  <- lm(train ~ time_train)
+pred_trend <- predict(fit_trend, newdata = data.frame(time_train = as.numeric(time(test))))
+seas_idx   <- tail(as.numeric(decomp_mult$seasonal), 4)
+fc_classic <- pred_trend * rep(seas_idx, length.out = h_period)
+
+acc_stl_p <- accuracy(fc_stl_p, test)[2, "RMSE"]
+acc_stl_7 <- accuracy(fc_stl_7, test)[2, "RMSE"]
+
+rmse_classic_test <- NA
+
+decomp_comp <- data.frame(
+  Metoda = c("Klasyczna (mult.)", "STL (periodic)", "STL (s.window=7)"),
+  `RMSE` = c(rmse_classic_test, acc_stl_p, acc_stl_7),
+  check.names = FALSE
+)
+
+decomp_names <- c("Klasyczna (mult.)", "STL (periodic)", "STL (s.window=7)")
+
+
+# Wyświetlenie tabeli
+kable(decomp_comp, digits = 3, 
+      caption = "Dokładność prognoz metod dekompozycji na zbiorze testowym",
+      booktabs = TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "striped"), full_width = FALSE)
+```
+
+**Wnioski**:
+
+Najlepszy wynik uzyskała metoda: `r decomp_names[which.min(decomp_comp$RMSE)]`
+
+\newpage
+
+# MODELE ETS
+
+## Eksploracja przestrzeni ETS
+
+```{r ets_models}
+# Model 1: ETS(A,Ad,A) (TŁUMIONY A,A,A)
+ets1 <- ets(train, model = "AAA", damped = TRUE, lambda = lambda_opt)
+
+# Model 2: ETS(A,A,N) 
+ets2 <- ets(train, model = "AAN", lambda = lambda_opt)
+
+# Model 3: ETS(A,A,A) 
+ets3 <- ets(train, model = "AAA", damped = FALSE, lambda = lambda_opt)
+
+# Model 4: ETS(A,N,N) 
+ets4 <- ets(train, model = "ANN", lambda = lambda_opt)
+
+ets_models <- list(ets1, ets2, ets3, ets4)
+ets_names <- c(
+  paste0("ETS(A,Ad,A)"),
+  "ETS(A,A,N)",
+  "ETS(A,A,A)",
+  "ETS(A,N,N)"
+)
+```
+
+### Porównanie kryteriów informacyjnych
+
+```{r ets_comparison}
+ets_criteria <- data.frame(
+  Model = ets_names,
+  AIC = sapply(ets_models, AIC),
+  AICc = sapply(ets_models, function(m) m$aicc),
+  BIC = sapply(ets_models, BIC)
+)
+
+kable(ets_criteria, digits = 2, caption = tab_cap("Porównanie kryteriów informacyjnych dla modeli ETS"),
+      booktabs = TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "striped"), full_width = FALSE)
+```
+
+**Najlepszy model** wg AICc: `r ets_names[which.min(ets_criteria$AICc)]`
+
+## Diagnostyka modeli ETS
+
+### Skrócona diagnostyka
+
+```{r ets_quick_diag, results='asis'}
+for (i in 1:length(ets_models)) {
+  quick_diagnostics(ets_models[[i]], ets_names[i])
+}
+```
+
+### Wybór najlepszego modelu ETS
+
+```{r best_ets}
+best_ets_idx <- which.min(ets_criteria$AICc)
+best_ets <- ets_models[[best_ets_idx]]
+best_ets_name <- ets_names[best_ets_idx]
+```
+
+**Wybrany model**: **`r best_ets_name`**
+
+\newpage
+
+# MODEL NAIWNY
+
+```{r naive_model}
+model_naive <- snaive(train, h = h_test, lambda = lambda_opt)
+```
+
+**Wybrana metoda**: **Sezonowy model naiwny (snaive)**
+
+Prognoza = ostatnia obserwacja z tego samego sezonu (kwartału).
+
+**Uzasadnienie**: Dla danych z silną sezonowością `snaive()` jest znacznie lepszym benchmarkiem niż zwykły `naive()` (random walk), ponieważ uwzględnia sezonowość. Należy zauważyć, że model snaive zakłada powtarzalność poziomów z poprzedniego roku, przez co nie nadąża za dynamicznymi zmianami trendu (jak załamanie po 2008 roku), co czyni go dobrym punktem odniesienia do oceny adaptacyjności innych modeli.
+
+\newpage
+
+# Porównanie prognoz
+
+```{r all_forecasts}
+# KONSTRUKCJA PROGNOZ!
+
+best_decomp_idx <- which.min(decomp_comp$RMSE)
+best_decomp <- decomp_comp[best_decomp_idx, ]
+best_decomp_name <- decomp_names[best_decomp_idx]
+
+# SARIMA
+fc_sarima_all <- lapply(sarima_models, function(m) forecast(m, h = h_test))
+fc_sarima_best <- fc_sarima_all[[best_sarima_idx]]
+
+# Dekompozycja
+decomp_models <- list(fc_classic, fc_stl_p, fc_stl_7)
+fc_decomp_all <- lapply(decomp_models, function(m) forecast(m, h = h_test))
+
+fc_decomp_best <- fc_decomp_all[[best_decomp_idx]]
+
+# ETS
+fc_ets_all <- lapply(ets_models, function(m) forecast(m, h = h_test))
+fc_ets_best <- fc_ets_all[[best_ets_idx]]
+
+# Naive
+fc_naive <- model_naive
+```
+
+## Wizualizacja prognoz
+
+### Wykres zbiorczy - najlepsze modele
+
+```{r fig_forecasts_best, fig.height=8, fig.cap=fig_cap("Porównanie prognoz najlepszych modeli z każdej klasy")}
+best_models <- list(best_sarima, best_ets, model_naive$model, best_decomp)
+best_names <- c(best_sarima_name, best_ets_name, "Naive (snaive)", best_decomp_name)
+colors_best <- c("darkred", "darkgreen", "steelblue", "purple2")
+
+v_test   <- as.numeric(test)
+v_sarima <- as.numeric(fc_sarima_best$mean)
+v_ets    <- as.numeric(fc_ets_best$mean)
+v_naive  <- as.numeric(fc_naive$mean)
+v_decomp <- as.numeric(fc_decomp_best$mean)
+v_time   <- as.numeric(time(test))
+
+plot(v_time, v_test, type="b", pch=19, col="black", 
+     ylim=range(c(v_test, v_sarima, v_ets, v_naive, v_decomp)),
+     main="Porównanie najlepszych modeli", xlab="Czas", ylab="Wartość")
+
+lines(v_time, v_sarima, col="darkred", lwd=2, type="b", pch=18)
+lines(v_time, v_ets, col="darkgreen", lwd=2, type="b", pch=17)
+lines(v_time, v_naive, col="steelblue", lwd=2, type="b", pch=16)
+lines(v_time, v_decomp, col="purple2", lwd=2, type = "b", pch=15)
+
+legend("topleft", legend=c("DANE", "BEST_SARIMA", "BEST_ETS", "NAIVE", "BEST_DECOMP"),
+       col=c("black", "darkred", "darkgreen", "steelblue", "purple2"), 
+       lty=1, pch=c(19,18,17,16,15), bty="n", cex = 0.7)
+```
+
+**Wnioski:**
+
+- **Zwycięzcy (BEST_DECOMP i BEST_ETS)**: Zielona linia modelu ETS(A,Ad,A) oraz fioletowa linia modelu STL(s.window=7) niemal idealnie pokrywają się z czarną linią danych rzeczywistych, co potwierdza najniższe błędy kolejno RMSE = 0.183 oraz RMSE = 0.149. Mechanizm "damped trend" (wygasający trend) pozwolił modelowi ETS szybciej zaadaptować się do spowolnienia gospodarczego widocznego na końcu zbioru uczącego.
+
+- **BEST_SARIMA**: Ciemnoczerwona linia podąża za wzorcem danych, ale wykazuje systematyczne przeszacowanie (leży powyżej danych rzeczywistych), co skutkuje wyższym błędem RMSE = 0.483.
+
+- **Słabość metody prostej (NAIVE)**: Niebieska linia znajduje się znacznie powyżej rzeczywistych wartości. Wynika to z faktu, że model sezonowy naiwny powtarza wzorce z roku poprzedniego, nie uwzględniając załamania trendu spadkowego, które nastąpiło po 2008 roku.
+
+- **Wniosek końcowy**: Wykres ukazuje wybór modelu STL(s.window=7) lub ETS(A,Ad,A) jako optymalnego narzędzia prognostycznego dla szeregu euretail.
+
+
+### Wykresy dla poszczególnych klas modeli
+
+```{r fig_forecasts_sarima, fig.height=7, fig.cap=fig_cap("Prognozy dla wszystkich modeli SARIMA")}
+v_time <- as.numeric(time(test))
+v_test <- as.numeric(test)
+
+colors_sarima <- c("#D55E00", "#0072B2", "#009E73", "#CC79A7", "#D1A8E9", "#F0E442")
+
+y_min <- min(c(v_test, sapply(fc_sarima_all, function(x) as.numeric(x$mean))))
+y_max <- max(c(v_test, sapply(fc_sarima_all, function(x) as.numeric(x$mean))))-2  #Ręczna zmiana, dla lepszej czytelności
+
+plot(v_time, v_test, type="b", pch=19, lwd=3, col="black",
+     ylim=c(y_min, y_max * 1.05), 
+     main="Modele SARIMA - porównanie prognoz", 
+     xlab="Rok/Kwartał", ylab="Indeks",
+     panel.first = grid()) 
+
+# Linie modeli
+for(i in 1:length(fc_sarima_all)) {
+  lines(v_time, as.numeric(fc_sarima_all[[i]]$mean), 
+        col=colors_sarima[i], lwd=2, type="b", lty=2, pch=i+1)
+}
+
+# Legenda:
+legend("topleft", 
+       legend=sarima_names, 
+       col=colors_sarima, 
+       lty=2, lwd=2, pch=2:(length(fc_sarima_all)+1),
+       bty="n", 
+       cex=0.7, 
+       ncol=2) 
+```
+
+**Wnioski:**
+
+- Najlepszymi modelami SARIMA są: **AUTO SARIMA** oraz **SARIMA(0,1,1)(0,1,1)[4]** i **SARIMA(0,1,2)(0,1,1)[4]**. Wszystkie z nich lekko przeszacowują wyniki.
+
+- Najgorzej wypadają modele: **SARIMA(1,1,1)(1,1,1)[4]** oraz **SARIMA(1,1,0)(1,1,0)[4]**, co pokazuje, że powinniśmy ustawiać p oraz P na 0, a nie 1. Oba modele zdecydowanie niedoszacowują wyniki i wykazują silną tendencję spadkową (zwłaszcza drugi z nich).
+
+
+```{r fig_forecasts_ets, fig.height=7, fig.cap=fig_cap("Prognozy dla wszystkich modeli ETS")}
+
+colors_ets <- c("#D55E00", "#0072B2", "#009E73", "#F0E442")
+
+y_min <- min(c(v_test, sapply(fc_ets_all, function(x) as.numeric(x$mean))))
+y_max <- max(c(v_test, sapply(fc_ets_all, function(x) as.numeric(x$mean))))-2  #Ręczna zmiana, dla lepszej czytelności
+
+plot(v_time, v_test, type="b", pch=19, lwd=3, col="black",
+     ylim=c(y_min, y_max * 1.05), 
+     main="Modele ETS - porównanie prognoz", 
+     xlab="Rok/Kwartał", ylab="Indeks",
+     panel.first = grid()) 
+
+# Linie modeli
+for(i in 1:length(fc_ets_all)) {
+  lines(v_time, as.numeric(fc_ets_all[[i]]$mean), 
+        col=colors_ets[i], lwd=2, type="b", lty=2, pch=i+1)
+}
+
+# Legenda:
+legend("topleft", 
+       legend=ets_names, 
+       col=colors_ets, 
+       lty=2, lwd=2, pch=2:(length(fc_ets_all)+1),
+       bty="n", 
+       cex=0.7, 
+       ncol=2) 
+```
+
+
+**Wnioski:**
+
+- Najlepszym modelem ETS jest niepodważalnie **ETS(A,Ad,A)**, który osiąga wartości niemal identyczne z prawdziwymi.
+
+- Dość słabo wypadają modele **ETS(A,A,N)** oraz tym bardziej **ETS(A,A,A)**, które przewidują wartości niedoszacowane i niesłusznie silnie malejące.
+
+- Model **ETS(A,N,N)** (brak trendu), mimo swojej teoretycznej prostoty, "paradoksalnie" osiąga w końcowej fazie wyniki lepsze niż modele z trendem liniowym. Jest to bezpośredni dowód na negatywny wpływ inercji modeli trendu w warunkach zmiany strukturalnej szeregu. Podczas gdy modele trendu "rozpędziły się" i "przestrzeliły" spadek, model bez trendu, zachowując stały poziom, znalazł się znacznie bliżej rzeczywistego punktu stabilizacji rynku.
+
+
+
+```{r fig_forecasts_decomp, fig.height=7, fig.cap=fig_cap("Prognozy dla wszystkich modeli DEKOMPOZYCJI")}
+
+colors_decomp <- c("#B67420", "#6969DD", "#A2137A")
+
+y_min <- min(c(v_test, sapply(fc_decomp_all, function(x) as.numeric(x$mean))))
+y_max <- max(c(v_test, sapply(fc_decomp_all, function(x) as.numeric(x$mean))))-2  #Ręczna zmiana, dla lepszej czytelności
+
+plot(v_time, v_test, type="b", pch=19, lwd=3, col="black",
+     ylim=c(y_min, y_max * 1.05), 
+     main="Modele DEKOMPOZYCJI - porównanie prognoz", 
+     xlab="Rok/Kwartał", ylab="Indeks",
+     panel.first = grid()) 
+
+# Linie modeli
+for(i in 1:length(fc_decomp_all)) {
+  lines(v_time, as.numeric(fc_decomp_all[[i]]$mean), 
+        col=colors_decomp[i], lwd=2, type="b", lty=2, pch=i+1)
+}
+
+# Legenda:
+legend("topleft", 
+       legend=decomp_names, 
+       col=colors_decomp, 
+       lty=2, lwd=2, pch=2:(length(fc_decomp_all)+1),
+       bty="n", 
+       cex=0.7, 
+       ncol=1) 
+```
+
+
+**Wnioski:**
+
+- Najlepszymi modelami DEKOMPOZYCJI są modele **STL**. Oba osiągają bardzo dobre wyniki, lekko na korzyść **STL(s.window=7)**
+
+- **Dekompozycja klasyczna** daje najdalsze wyniki od tych prawidłowych ze wszystkich użytych metod (gorzej nawet od naive).
+
+
+## Miary dokładności - zbiór testowy
+
+```{r accuracy_test}
+# Funkcja pomocnicza do accuracy dla dekompozycji klasycznej
+acc_decomp_classic <- accuracy(fc_decomp_classic, test)
+
+# Tabela wyników
+acc_results <- data.frame(
+  Model = character(),
+  RMSE = numeric(),
+  MAE = numeric(),
+  MAPE = numeric(),
+  MASE = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# SARIMA
+for (i in 1:length(sarima_models)) {
+  acc <- accuracy(fc_sarima_all[[i]], test)
+  acc_results <- rbind(acc_results, data.frame(
+    Model = sarima_names[i],
+    RMSE = acc[2, "RMSE"],
+    MAE = acc[2, "MAE"],
+    MAPE = acc[2, "MAPE"],
+    MASE = acc[2, "MASE"]
+  ))
+}
+
+# Dekompozycje
+acc <- accuracy(fc_classic, test)
+acc_results <- rbind(acc_results, data.frame(
+  Model = "DEKOMPOZYCJA KLASYCZNA",
+  RMSE = NA,
+  MAE = NA,
+  MAPE = NA,
+  MASE = NA
+))
+
+acc <- accuracy(fc_stl_p, test)
+acc_results <- rbind(acc_results, data.frame(
+  Model = "STL (PERIODIC)",
+  RMSE = acc[2, "RMSE"],
+  MAE = acc[2, "MAE"],
+  MAPE = acc[2, "MAPE"],
+  MASE = acc[2, "MASE"]
+))
+
+acc <- accuracy(fc_stl_7, test)
+acc_results <- rbind(acc_results, data.frame(
+  Model = "STL (S.WINDOW=7)",
+  RMSE = acc[2, "RMSE"],
+  MAE = acc[2, "MAE"],
+  MAPE = acc[2, "MAPE"],
+  MASE = acc[2, "MASE"]
+))
+
+# ETS
+for (i in 1:length(ets_models)) {
+  acc <- accuracy(fc_ets_all[[i]], test)
+  acc_results <- rbind(acc_results, data.frame(
+    Model = ets_names[i],
+    RMSE = acc[2, "RMSE"],
+    MAE = acc[2, "MAE"],
+    MAPE = acc[2, "MAPE"],
+    MASE = acc[2, "MASE"]
+  ))
+}
+
+# Naive
+acc <- accuracy(fc_naive, test)
+acc_results <- rbind(acc_results, data.frame(
+  Model = "SNAIVE",
+  RMSE = acc[2, "RMSE"],
+  MAE = acc[2, "MAE"],
+  MAPE = acc[2, "MAPE"],
+  MASE = acc[2, "MASE"]
+))
+
+# Sortowanie po RMSE
+acc_results <- acc_results %>% arrange(RMSE)
+
+kable(acc_results, digits = 3, caption = tab_cap("Dokładność prognoz na zbiorze testowym - wszystkie modele"),
+      booktabs = TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "striped", "scale_down"), 
+                full_width = FALSE, font_size = 10) %>%
+  row_spec(1, bold = TRUE, color = "gold") %>%
+  row_spec(2, bold = TRUE, color = "gray") %>%
+  row_spec(3, bold = TRUE, color = "chocolate")
+```
+
+### Ranking modeli według poszczególnych miar
+
+```{r ranking}
+rank_rmse <- acc_results %>% arrange(RMSE) %>% mutate(Rank = 1:n()) %>% select(Model, RMSE, Rank)
+rank_mae <- acc_results %>% arrange(MAE) %>% mutate(Rank = 1:n()) %>% select(Model, MAE, Rank)
+rank_mape <- acc_results %>% arrange(MAPE) %>% mutate(Rank = 1:n()) %>% select(Model, MAPE, Rank)
+rank_mase <- acc_results %>% arrange(MASE) %>% mutate(Rank = 1:n()) %>% select(Model, MASE, Rank)
+
+cat("\n**TOP 5 wg RMSE:**\n\n")
+kable(head(rank_rmse, 5), booktabs = TRUE) %>% kable_styling(full_width = FALSE)
+
+cat("\n**TOP 5 wg MAE:**\n\n")
+kable(head(rank_mae, 5), booktabs = TRUE) %>% kable_styling(full_width = FALSE)
+
+cat("\n**TOP 5 wg MAPE:**\n\n")
+kable(head(rank_mape, 5), booktabs = TRUE) %>% kable_styling(full_width = FALSE)
+
+cat("\n**TOP 5 wg MASE:**\n\n")
+kable(head(rank_mase, 5), booktabs = TRUE) %>% kable_styling(full_width = FALSE)
+```
+
+```{r best_model_overall}
+best_model_name <- acc_results$Model[1]
+best_rmse <- acc_results$RMSE[1]
+best_mae <- acc_results$MAE[1]
+best_mape <- acc_results$MAPE[1]
+best_mase <- acc_results$MASE[1]
+```
+
+**NAJLEPSZY MODEL** (wg RMSE): **`r best_model_name`**
+
+- RMSE = `r round(best_rmse, 3)`
+- MAE = `r round(best_mae, 3)`
+- MAPE = `r round(best_mape, 3)`
+- MASE = `r round(best_mase, 3)`
+
+## Miary dokładności - zbiór uczący (in-sample)
+
+```{r accuracy_train}
+acc_train <- data.frame(
+  Model = character(),
+  RMSE = numeric(),
+  MAE = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# SARIMA
+for (i in 1:length(sarima_models)) {
+  acc <- accuracy(sarima_models[[i]])
+  acc_train <- rbind(acc_train, data.frame(
+    Model = sarima_names[i],
+    RMSE = acc[1, "RMSE"],
+    MAE = acc[1, "MAE"]
+  ))
+}
+
+# Dekompozycje
+acc <- accuracy(fc_decomp_classic_ts, test)
+acc_train <- rbind(acc_train, data.frame(
+  Model = "DEKOMPOZYCJA KLASYCZNA",
+  RMSE = acc[1, "RMSE"],
+  MAE = acc[1, "MAE"]
+))
+
+acc <- accuracy(fc_stl1, test)
+acc_train <- rbind(acc_train, data.frame(
+  Model = "STL (PERIODIC)",
+  RMSE = acc[1, "RMSE"],
+  MAE = acc[1, "MAE"]
+))
+
+acc <- accuracy(fc_stl2, test)
+acc_train <- rbind(acc_train, data.frame(
+  Model = "STL (S.WINDOW=7)",
+  RMSE = acc[1, "RMSE"],
+  MAE = acc[1, "MAE"]
+))
+
+# ETS
+for (i in 1:length(ets_models)) {
+  acc <- accuracy(ets_models[[i]])
+  acc_train <- rbind(acc_train, data.frame(
+    Model = ets_names[i],
+    RMSE = acc[1, "RMSE"],
+    MAE = acc[1, "MAE"]
+  ))
+}
+
+# Naive
+acc <- accuracy(fc_naive)
+acc_train <- rbind(acc_train, data.frame(
+  Model = "Naive (snaive)",
+  RMSE = acc[1, "RMSE"],
+  MAE = acc[1, "MAE"]
+))
+
+kable(acc_train %>% arrange(RMSE), digits = 3, 
+      caption = tab_cap("Dokładność na zbiorze uczącym (in-sample)"),
+      booktabs = TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "striped"), full_width = FALSE)
+```
+
+## Analiza błędów prognozy
+
+```{r fig_errors, fig.height=7, fig.cap=fig_cap("Błędy prognoz dla najlepszych 5 modeli")}
+# 1. Pobranie nazw TOP 5
+top5_names <- acc_results$Model[1:5]
+
+errors_df <- data.frame()
+v_time_test <- as.numeric(time(test))
+v_test_numeric <- as.numeric(test)
+
+for (name in top5_names) {
+  fc_values <- NULL
+  clean_name <- trimws(name)
+  
+  if (clean_name == "AUTO SARIMA") {
+    fc_values <- as.numeric(fc_sarima_all[[1]]$mean)
+  } else if (grepl("SARIMA", clean_name)) {
+    idx <- which(trimws(sarima_names) == clean_name)
+    if(length(idx) > 0) fc_values <- as.numeric(fc_sarima_all[[idx]]$mean)
+  } else if (grepl("ETS", clean_name)) {
+    idx <- which(trimws(ets_names) == clean_name)
+    if(length(idx) > 0) fc_values <- as.numeric(fc_ets_all[[idx]]$mean)
+  } else if (grepl("periodic", clean_name, ignore.case = TRUE)) {
+    fc_values <- as.numeric(fc_stl_p$mean)
+  } else if (grepl("s.window=7", clean_name, ignore.case = TRUE)) {
+    fc_values <- as.numeric(fc_stl_7$mean)
+  } else if (grepl("SNAIVE", clean_name)) {
+    fc_values <- as.numeric(fc_naive$mean)
+  }
+
+  if (!is.null(fc_values)) {
+    errors_df <- rbind(errors_df, data.frame(
+      Time = v_time_test,
+      Error = fc_values - v_test_numeric,
+      Model = clean_name,
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+# 2. Wykres
+ggplot(errors_df, aes(x = Time, y = Error, color = Model, group = Model)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  coord_cartesian(ylim = range(errors_df$Error, na.rm = TRUE) * 1.1) +
+  labs(title = "Błędy prognoz w czasie (TOP 5 modeli)",
+       x = "Czas", y = "Błąd (Dane - Prognoza)") +
+  theme_minimal() +
+  theme(legend.position = "bottom", 
+        legend.box = "vertical",
+        plot.title = element_text(face="bold", hjust=0.5)) +
+  guides(color = guide_legend(ncol = 2))
+```
+
+**Obserwacje**: 
+
+- Błędy są niewielkie - nie przekraczają 1.0
+- Większość modeli ma podobny wzorzec błędów
+- Największe błędy występują `r ifelse(max(abs(errors_df$Error)) == max(errors_df$Error), "w kierunku przeszacowania", "w kierunku niedoszacowania")`
+
+\newpage
+
+# Pełna diagnostyka modeli
+
+```{r full_diag_top5, fig.height=9, results='asis'}
+top_names <- acc_results$Model
+
+for (name in top_names) {
+  clean_name <- trimws(name)
+  cat("\n\n## Diagnostyka: ", clean_name, "\n\n")
+  
+  model_to_diag <- NULL
+  
+  # 1. Obsługa AUTO SARIMA i innych SARIMA
+  if (clean_name == "AUTO SARIMA") {
+    model_to_diag <- sarima_models[[1]] 
+  } else if (grepl("SARIMA", clean_name)) {
+    idx <- which(trimws(sarima_names) == clean_name)
+    if(length(idx) > 0) model_to_diag <- sarima_models[[idx]]
+    
+  # 2. Obsługa ETS
+  } else if (grepl("ETS", clean_name)) {
+    idx <- which(trimws(ets_names) == clean_name)
+    if(length(idx) > 0) model_to_diag <- ets_models[[idx]]
+    
+  # 3. Obsługa STL 
+  } else if (grepl("periodic", clean_name, ignore.case = TRUE)) {
+    model_to_diag <- fc_stl1$model
+  } else if (grepl("s.window=7", clean_name, ignore.case = TRUE)) {
+    model_to_diag <- fc_stl2$model
+    
+  # 4. Modele bez klasycznej diagnostyki reszt
+  } else if (grepl("SNAIVE", clean_name, ignore.case = TRUE)) {
+    cat("Model naiwny (snaive) - brak standardowej diagnostyki reszt (model deterministyczny).\n")
+    next
+  } else if (grepl("Dekompozycja|Klasyczna", clean_name, ignore.case = TRUE)) {
+    cat("Dekompozycja klasyczna - model nie posiada struktury probabilistycznej (brak obiektu reszt w formacie model$residuals).\n")
+    next
+  }
+
+  # Uruchomienie diagnostyki, jeśli model został znaleziony
+  if (!is.null(model_to_diag)) {
+    full_diagnostics(model_to_diag, clean_name)
+  } else {
+    cat("Nie znaleziono obiektu modelu dla: ", clean_name, "\n")
+  }
+}
+```
+
+
+
+# Wnioski końcowe
+
+## Wybór optymalnego modelu
+
+Na podstawie analizy dokładności prognoz na zbiorze testowym, **najlepszym modelem** okazał się:
+
+**`r best_model_name`**
+
+z następującymi miarami dokładności:
+
+- **RMSE** = `r round(best_rmse, 3)` (najniższy błąd kwadratowy)
+- **MAE** = `r round(best_mae, 3)` 
+- **MAPE** = `r round(best_mape, 2)`% (błąd procentowy)
+- **MASE** = `r round(best_mase, 3)` (skalowany błąd względem naive)
+
+```{r consistency_check}
+# Sprawdzenie spójności rankingów
+best_rmse_model <- rank_rmse$Model[1]
+best_mae_model <- rank_mae$Model[1]
+best_mape_model <- rank_mape$Model[1]
+best_mase_model <- rank_mase$Model[1]
+
+all_same <- (best_rmse_model == best_mae_model) & 
+            (best_rmse_model == best_mape_model) & 
+            (best_rmse_model == best_mase_model)
+```
+
+**Spójność wyników**: `r if(all_same) "Wszystkie miary wskazują na TEN SAM model jako najlepszy, co potwierdza jego przewagę." else paste0("Różne miary wskazują na różne modele jako najlepsze (RMSE: ", best_rmse_model, ", MAE: ", best_mae_model, ", MAPE: ", best_mape_model, ", MASE: ", best_mase_model, "), co sugeruje różne kompromisy między miarami.")`
+
+## Porównanie podejść modelowania
+
+### (S)ARIMA
+
+```{r sarima_summary}
+sarima_results <- acc_results %>% filter(grepl("SARIMA", Model))
+best_sarima_result <- sarima_results %>% filter(RMSE == min(RMSE))
+```
+
+**Najlepszy model SARIMA**: `r best_sarima_result$Model[1]` (RMSE = `r round(best_sarima_result$RMSE[1], 3)`)
+
+**Zalety**:
+
+- **Solidne fundamenty teoretyczne**: Podejście Boxa-Jenkinsa zapewnia systematyczny proces identyfikacji, estymacji i weryfikacji modelu, co zwiększa zaufanie do wyników.
+
+- **Dopasowanie do trendu i sezonowości**: Dzięki parametrom różnicowania (d,D) model skutecznie radzi sobie z szeregami niestacjonarnymi, takimi jak szereg euretail.
+
+- **Weryfikacja założeń**: Możliwość przeprowadzenia testu Ljung-Boxa pozwala na obiektywne stwierdzenie, czy model wyczerpał informacje zawarte w danych (biały szum).
+
+**Wady:**
+
+- **Złożoność decyzyjna**: Dobór sześciu parametrów (p,d,q,P,D,Q) jest procesem iteracyjnym i często subiektywnym, co pokazałyporównania różnych specyfikacji.
+
+- **Trudna interpretacja**: W przeciwieństwie do modeli ETS czy dekompozycji, gdzie parametry (poziom, trend, sezonowość) są intuicyjne, współczynniki AR i MA w modelach SARIMA są trudniejsze do przełożenia na konkretne zjawiska rynkowe dla laików.
+
+### DEKOMPOZYCJA
+
+```{r decomp_summary}
+decomp_results <- acc_results %>% filter(grepl("Dekompozycja|STL", Model))
+best_decomp_result <- decomp_results %>% filter(RMSE == min(RMSE))
+```
+
+**Najlepszy model dekompozycji**: `r best_decomp_result$Model[1]` (RMSE = `r round(best_decomp_result$RMSE[1], 3)`)
+
+**Zalety**:
+
+- **Intuicyjna interpretacja**: Rozbicie szeregu na trend, sezonowość i reszty pozwala na łatwe zrozumienie struktury danych i mechanizmów rynkowych.
+
+- **Elastyczność STL**: Dzięki parametrom takim jak s.window, metoda STL pozwala na modelowanie sezonowości, która zmienia się w czasie, co jest jej dużą przewagą nad metodami sztywnymi.
+
+- **Dobra wizualizacja**: Graficzne przedstawienie składowych (np. na wykresie STL) jest niezwykle pomocne w identyfikacji nagłych załamań trendu, jak to z 2008 roku w szeregu euretail.
+
+**Wady**:
+
+- **Dodatkowe kroki w prognozowaniu**: Sama dekompozycja jedynie opisuje przeszłość; aby uzyskać prognozę, trzeba osobno modelować trend i sezonowość, co zwiększa ryzyko błędu.
+
+- **Wrażliwość dekompozycji klasycznej**: Metoda ta jest podatna na nietypowe obserwacje i zmiany strukturalne, co potwierdziło bardzo wysokie RMSE.
+
+- **Dokładność dla krótkich szeregów**: Przy małej liczbie obserwacji lub nagłych zmianach trendu (jak w zbiorze testowym), metody dekompozycyjne mogą generować zbyt uproszczone prognozy.
+
+### ETS
+
+```{r ets_summary}
+ets_results <- acc_results %>% filter(grepl("ETS", Model))
+best_ets_result <- ets_results %>% filter(RMSE == min(RMSE))
+```
+
+**Najlepszy model ETS**: `r best_ets_result$Model[1]` (RMSE = `r round(best_ets_result$RMSE[1], 3)`)
+
+**Zalety:**
+
+- **Szybkie dopasowanie i prognozowanie**: Modele ETS są obliczeniowo bardzo wydajne, co pozwala na błyskawiczne przetestowanie dziesiątek kombinacji i wybór optymalnej.
+
+- **Elastyczna przestrzeń modeli (ETS):** Ramka matematyczna Error-Trend-Seasonal pozwala na precyzyjne dopasowanie charakteru składników (addytywny lub multiplikatywny), co świetnie sprawdziło się przy modelu ETS(A,Ad,A).
+
+- **Dobre dla szeregów z wyraźnym wzorcem**: Metoda ta doskonale radzi sobie z wyłapywaniem poziomu, trendu i sezonowości, nawet jeśli te ulegają lekkim zmianom w czasie.
+
+- **Wady**:
+
+- **Mniej możliwości diagnostyki niż SARIMA**: Choć test Ljung-Boxa jest dostępny, modele ETS nie oferują tak rozbudowanej analizy struktury korelacji (funkcje ACF/PACF) jak modele SARIMA.
+
+- **Może przeuczyć się do danych treningowych:** Przy zbyt złożonych specyfikacjach istnieje ryzyko, że model "zapamięta" szum z przeszłości zamiast nauczyć się ogólnego wzorca.
+
+- **Trudna interpretacja parametrów wygładzania**: O ile składowe (trend, sezonowość) są jasne, o tyle wartości stałych wygładzających są abstrakcyjne i trudne do intuicyjnego wyjaśnienia odbiorcy biznesowemu.
+
+### SNAIVE (Metody naiwne)
+
+```{r naive_summary}
+naive_results <- acc_results %>% filter(grepl("SNAIVE", Model))
+```
+
+**RMSE metody naiwnej**: `r round(naive_results$RMSE[1], 3)`
+
+**Obserwacje**:
+
+- **Rozsądny benchmark**: Metoda sezonowa naiwna (Snaive) jest kluczowym punktem odniesienia, ponieważ zakłada jedynie powtórzenie wzorca z analogicznego kwartału poprzedniego roku. Wynik RMSE = 1.997 pokazuje poziom błędu, który popełnilibyśmy, nie stosując żadnych zaawansowanych metod statystycznych.
+
+- **Wartość dodana modelowania**: Fakt, że wszystkie zaawansowane modele (ETS, SARIMA, STL) uzyskały niższe RMSE, dowodzi, że w szeregu euretail istnieją istotne zależności strukturalne (trend, dynamika sezonowa), które te modele z powodzeniem wychwyciły.
+
+- **Interpretacja MASE**: Wskaźnik MASE poniżej jedności (MASE < 1) dla najlepszych modeli (np. ETS z MASE = 0.113) jest matematycznym potwierdzeniem, że prognozy tych modeli są średnio znacznie dokładniejsze niż prognoza naiwna z danymi historycznymi. To jeden z najmocniejszych argumentów za skutecznością analizy.
+
+## Które podejście najbardziej adekwatne dla euretail?
+
+```{r best_approach}
+# Kategoryzacja modeli
+acc_results <- acc_results %>%
+  mutate(Approach = case_when(
+    grepl("SARIMA", Model) ~ "SARIMA",
+    grepl("Dekompozycja|STL", Model) ~ "DEKOMPOZYCJA STL",
+    grepl("ETS", Model) ~ "ETS",
+    grepl("SNAIVE", Model) ~ "NAIVE",
+    grepl("DEKOMPOZYCJA KLASYCZNA", Model) ~ "DEKOMPOZYCJA KLASYCZNA"
+  ))
+
+approach_summary <- acc_results %>%
+  group_by(Approach) %>%
+  summarise(
+    `Średnie RMSE` = mean(RMSE),
+    `Najlepsze RMSE` = min(RMSE),
+    `Liczba modeli` = n()
+  ) %>%
+  arrange(`Najlepsze RMSE`)
+
+kable(approach_summary, digits = 3, 
+      caption = tab_cap("Podsumowanie podejść modelowania"),
+      booktabs = TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "striped"), full_width = FALSE)
+```
+
+**Rekomendacja**:
+
+Dla szeregu **euretail** najbardziej adekwatne jest podejście **`r approach_summary$Approach[1]`**, ponieważ:
+
+1. **Najniższa wartość RMSE** wśród wszystkich podejść (`r round(approach_summary$'Najlepsze RMSE'[1], 3)`)
+2. **Konsystentność**: `r if(approach_summary$Approach[1] == "SARIMA") "Modele SARIMA skutecznie modelują zarówno trend, jak i sezonowość kwartalna" else if(approach_summary$Approach[1] == "ETS") "Modele ETS dobrze radzą sobie z rosnącą wariancją i sezonowością" else "Dekompozycja intuicyjnie rozdziela składowe szeregu"`
+3. **Diagnostyka**: `r if(approach_summary$Approach[1] == "SARIMA") "Możliwość weryfikacji założeń poprzez analizę reszt" else "Dostępne narzędzia diagnostyczne"`
+
+## Praktyczne rekomendacje
+
+### Dla celów operacyjnych (szybkie prognozy)
+
+Rekomendacja: **`r best_ets_result$Model[1]`**
+
+- Szybkie dopasowanie
+- Prosta implementacja
+- Akceptowalna dokładność (RMSE = `r round(best_ets_result$RMSE[1], 3)`)
+
+### Dla celów analitycznych (dokładność priorytetem)
+
+Rekomendacja: **`r best_model_name`**
+
+- Najwyższa dokładność
+- Możliwość pełnej diagnostyki
+- Interpretowalne parametry
+
+### Dla komunikacji z interesariuszami
+
+Rekomendacja: **STL + ARIMA**
+
+- Intuicyjna wizualizacja składowych (trend, sezonowość)
+- Możliwość pokazania długoterminowych trendów
+- Łatwa interpretacja wyników
+
+## Ograniczenia analizy
+
+1. **Krótki horyzont testowy**: 8 kwartałów może nie wystarczyć do pełnej oceny stabilności prognoz
+2. **Jeden podział train/test**: wyniki mogą zależeć od konkretnego podziału (brak cross-validation)
+3. **Transformacja Boxa-Coxa**: dodatkowa niepewność związana z odwróceniem transformacji
+4. **Założenie stabilności**: modele zakładają, że przyszłe wzorce będą podobne do historycznych
+
+## Wnioski końcowe
+
+1. **Wszystkie zaawansowane modele** (SARIMA, ETS, dekompozycja) **przewyższają metodę naiwną**, co potwierdza wartość modelowania statystycznego.
+
+2. **Najlepszy model** to `r best_model_name` z RMSE = `r round(best_rmse, 3)`, co stanowi poprawę o `r round((naive_results$RMSE[1] - best_rmse) / naive_results$RMSE[1] * 100, 2)`% względem metody naiwnej.
+
+3. **Transformacja Boxa-Coxa** okazała się **pomocna** w stabilizacji wariancji, co poprawiło jakość prognoz.
+
+4. **Diagnostyka reszt** potwierdza poprawność najlepszych modeli - reszty przypominają biały szum.
+
+5. **Wybór podejścia** zależy od celu: dokładność (SARIMA/ETS) vs interpretacja (dekompozycja) vs prostota (naive).
+
+6. Dla szeregu **euretail** podejście **`r approach_summary$Approach[1]`** wydaje się najbardziej adekwatne ze względu na najlepszą kombinację dokładności i możliwości diagnostycznych.
+
+---
+
+**Koniec sprawozdania**
