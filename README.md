@@ -40,4 +40,19 @@ This project focuses on the algorithmic implementation and mathematical derivati
 * **Performance Benchmarking**: Comparative execution time analysis between the Box-Muller transform and the Acceptance-Rejection method.
 
 ### Tools:
-* **R Libraries**: `knitr`, `xtable`, `ggplot2`, `gridExtra`, `latex2exp` for mathematical data visualization.
+* **R Libraries**: `knitr`, `xtable`, `ggplot2`, `gridExtra`, `latex2exp`.
+
+# Advanced Monte Carlo Integrations
+
+This technical report demonstrates advanced Monte Carlo simulation techniques, focusing on multivariate probability distributions, complex geometric integrations, and variance reduction algorithms.
+
+### Key Highlights:
+* **Multivariate Normal Generation**: Implemented a custom generator for a 4D Normal distribution $N_4(\boldsymbol{\mu}, \Sigma)$ utilizing **Cholesky Decomposition** to preserve covariance structures.
+* **Conditional & Generalized Ratio-of-Uniforms**: 
+    * Sampled from a 2D density over a simplex using marginal/conditional density derivation and Inverse Transform Sampling.
+    * Implemented the **Generalized Ratio-of-Uniforms ($r=3$)** method for a heavy-tailed 2D distribution, precisely calculating optimal bounding box limits.
+* **Geometric Monte Carlo Integration**: Estimated the volume of an ellipsoid and the area of the **Mandelbrot set** using Crude Monte Carlo, tracking estimator convergence and asymptotic $1/\sqrt{n}$ confidence intervals.
+* **Variance Reduction Techniques**: Systematically compared estimator efficiencies (Crude MC, **Antithetic Variates**, and **Importance Sampling**) for evaluating improper and highly oscillatory integrals, successfully minimizing standard errors under fixed computational budgets.
+
+### Tools:
+* **R Libraries**: `knitr`, `xtable`, `ggplot2`, `gridExtra`, `latex2exp`, `randtoolbox`, `pracma`, `ggExtra`, `grid`, `tidyr`, `dplyr`.
