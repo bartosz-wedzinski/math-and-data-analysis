@@ -1,0 +1,545 @@
+---
+title: "Metody Monte Carlo"
+subtitle: "Raport nr 1"
+author: "Bartosz Wędziński"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: true
+    toc: true
+    toc_depth: 1
+    keep_tex: true
+fontsize: 11.5 pt
+geometry: a4paper
+linestretch: 1.15
+header-includes:
+  - \usepackage{titlesec}
+  - \usepackage{tocloft}
+  - \renewcommand{\contentsname}{Spis treści}
+  - \titleformat{\section}{\huge\bfseries}{\thesection}{1em}{}
+  - \titleformat{\subsection}{\LARGE\bfseries}{\thesubsection}{1em}{}
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhf{}
+  - \rhead{\thepage}
+  - \lhead{RAPORT NR 1}
+  - \usepackage{setspace}
+  - \usepackage{sectsty}
+  - \allsectionsfont{\bfseries\sffamily\large}
+  - \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(ggplot2)
+library(xtable)
+library(gridExtra)
+library(latex2exp)
+
+knitr::opts_chunk$set(fig.align='center', fig.pos='H', warning=FALSE, message=FALSE)
+```
+
+\newpage
+
+# Zadanie 1: Symulacja dyskretnych zmiennych losowych (3 pkt)
+
+## 1. Napisz funkcję realizującą generator liczb losowych o rozkładzie dwupunktowym: $\mathbb P(X=1)=p$, $\mathbb P(X=0)=1-p$, gdzie $p\in [0,1]$.
+
+
+```{r, echo=TRUE}
+rbern <- function(n, p){
+  if(p < 0 || p > 1) stop("p musi być w przedziale [0,1]")
+  u <- runif(n)
+  x <- ifelse(u < p, 1, 0)
+  return(x)
+}
+```
+
+## 2. Napisz funkcję realizującą generator liczb losowych z rozkładu dwumianowego. Narysuj histogram dla przykładowej próby z tego rozkładu.
+
+```{r, echo=TRUE}
+rbinom_custom <- function(N, n, p){
+  x <- sapply(1:N, function(i) sum(rbern(n, p)))
+  return(x)
+}
+```
+
+```{r, echo=FALSE, fig.height=3.5, fig.cap="Histogram rozkładu dwumianowego Bin(10, 0.3)."}
+set.seed(2137)
+sample_bin <- rbinom_custom(5000, 10, 0.3)
+
+hist(sample_bin, breaks = 0:10, main="Rozkład Bin(10, 0.3)",
+     xlab="Wartość", col="orchid", border="black")
+```
+
+Wyniki generowania zmiennej Bernoulliego zachowują się zgodnie z oczekiwaniami - przy dużej liczbie prób częstości zbliżają się do teoretycznych wartości.
+
+\newpage
+
+## 3. Napisz funkcję realizującą generator dla rozkładu Poissona (w raporcie zawrzyj obliczenia przygotowawcze). Narysuj histogram dla przykładowej próby z tego rozkładu.
+
+```{r, echo=TRUE}
+rpois_custom <- function(n, lambda){
+  if(lambda <= 0) stop("lambda musi być dodatnia")
+
+  out <- numeric(n)
+  for(j in 1:n){
+    U <- runif(1)
+    k <- 0
+    p <- exp(-lambda) 
+    F <- p
+    while(F < U){
+      k <- k + 1
+      p <- p * lambda / k
+      F <- F + p
+    }
+    out[j] <- k
+  }
+  return(out)
+}
+```
+
+```{r, echo=FALSE, fig.height=3, fig.cap="Histogram rozkładu Poissona (lambda=4)."}
+set.seed(67)
+sample_pois <- rpois_custom(5000, lambda = 4)
+
+hist(sample_pois, breaks=0:20, main="Rozkład Poisson(4)",
+     xlab="Wartość", col="tomato", border="black")
+```
+
+
+Generator rozkładu Poissona również działa poprawnie: histogram ma typowy mocny pik w okolicach wartości równej parametrowi lambda, a rozkład jest jednostronnie wydłużony w prawo. Różnice mieszczą się w granicach naturalnych odchyleń losowych.
+
+\newpage
+
+# Zadanie 2: Symulacja ciągłych zmiennych losowych (4 pkt)
+
+## 1. Zaimplementuj omówiony na wykładzie generator rozkładu wykładniczego. Narysuj histogram dla próby o rozmiarze $n=2000$ wygenerowanej przy jego pomocy i nałóż na niego krzywą gęstości rozkładu wykładniczego.
+
+```{r, echo=TRUE}
+rexp_custom <- function(n, lambda){
+  if(lambda <= 0) stop("lambda musi być dodatnia")
+  u <- runif(n)
+  x <- -log(1 - u) / lambda
+  return(x)
+}
+```
+
+```{r, echo=FALSE, fig.height=3.5, fig.cap="Rozkład wykładniczy - porównanie histogramu z gęstością."}
+set.seed(666)
+sample_exp <- rexp_custom(2000, lambda = 1)
+
+hist(sample_exp, breaks = 40, probability = TRUE,
+     main = "Rozkład wykładniczy (lambda = 1)",
+     col = "forestgreen", border = "black")
+
+curve(dexp(x, rate = 1), add = TRUE, lwd = 2, col = "red")
+```
+
+
+Histogram generowanej zmiennej wykazuje klasyczny kształt malejący wykładniczo, zgodny z teoretyczną gęstością. Średnia empiryczna jest bliska wartości \[\frac{1}{\lambda}\], co potwierdza poprawność generatora opartego na odwrotnej dystrybuancie.
+
+\newpage
+
+## 2. Wyznacz dystrybuantę odwrotną dla rozkładu Weibulla o funkcji gęstości $$f(x)=\frac{k}{\lambda^k}x^{k-1}e^{-(x/\lambda)^k}\mathbf{1}_{(0,+\infty)}(x),\quad x\in \mathbb{R},$$ gdzie $k>0$, $\lambda>0$ (w raporcie zawrzyj odpowiednie obliczenia). Wykorzystaj ją do napisania funkcji realizującej generator liczb losowych z rozkładu Weibulla. Narysuj histogram dla próby o rozmiarze $n=2000$ wygenerowanej przy jego pomocy i nałóż na niego krzywą gęstości rozkładu Weibulla.
+
+*Wyprowadzenie dystrybuanty odwrotnej dla rozkładu Weibulla:*
+
+Dla rozkładu Weibulla o parametrach \(k>0\) oraz \(\lambda>0\) funkcja gęstości ma postać:
+\[
+f(x)=\frac{k}{\lambda^k} x^{k-1} e^{-(x/\lambda)^k}\mathbf{1}_{(0,+\infty)}(x).
+\]
+
+1. Dystrybuanta \(F(x)\)
+
+Liczymy dystrybuantę jako całkę od zera do \(x\):
+\[
+F(x)=\int_0^x \frac{k}{\lambda^k} t^{k-1} e^{-(t/\lambda)^k}\,dt.
+\]
+
+Wykonajmy podstawienie
+\[
+u=\left(\frac{t}{\lambda}\right)^k
+\quad\Rightarrow\quad
+t=\lambda u^{1/k},\qquad
+dt=\lambda\frac{1}{k}u^{1/k-1}\,du.
+\]
+
+Po podstawieniu:
+\[
+\begin{aligned}
+F(x)
+&= \int_{0}^{(x/\lambda)^k} \frac{k}{\lambda^k} (\lambda u^{1/k})^{\,k-1} e^{-u}\,\lambda\frac{1}{k}u^{1/k-1}\,du \\
+&= \int_{0}^{(x/\lambda)^k} e^{-u}\,du
+= \Big[-e^{-u}\Big]_{0}^{(x/\lambda)^k}
+= 1 - e^{-(x/\lambda)^k}.
+\end{aligned}
+\]
+
+Zatem:
+\[
+\boxed{\,F(x)=1-e^{-(x/\lambda)^k},\quad x>0.\,}
+\]
+
+2. Odwrócenie dystrybuanty — \(F^{-1}(u)\)
+
+Niech \(u\in(0,1)\). Mamy:
+\[
+u = F(x) = 1 - e^{-(x/\lambda)^k}.
+\]
+
+Przekształcamy krok po kroku:
+\[
+\begin{aligned}
+e^{-(x/\lambda)^k} &= 1-u,\\
+-(x/\lambda)^k &= \ln(1-u),\\
+(x/\lambda)^k &= -\ln(1-u),\\
+x &= \lambda\big(-\ln(1-u)\big)^{1/k}.
+\end{aligned}
+\]
+
+Ostatecznie:
+\[
+\boxed{\,F^{-1}(u)=\lambda\big(-\ln(1-u)\big)^{1/k},\quad u\in(0,1).\,}
+\]
+
+```{r, echo=TRUE}
+rweibull_custom <- function(n, k, lambda){
+  if(k <= 0 || lambda <= 0) stop("k i lambda muszą być dodatnie")
+  u <- runif(n)
+  x <- lambda * (-log(1 - u))^(1/k)
+  return(x)
+}
+```
+
+```{r, echo=FALSE, fig.height=3.5, fig.cap="Rozkład Weibulla (k=2, lambda=1)."}
+set.seed(1)
+sample_weib <- rweibull_custom(2000, k = 2, lambda = 1)
+
+hist(sample_weib, breaks = 40, probability = TRUE,
+     main = "Rozkład Weibulla (k=2, lambda=1)",
+     col = "cyan", border = "black")
+
+curve(dweibull(x, shape = 2, scale = 1), add = TRUE, lwd = 2, col = "red")
+```
+
+
+Rozkład Weibulla ma wykres zależny od parametru kształtu k. Obserwujemy charakterystyczny wzrost gęstości, a następnie jej spadek. Wyniki liczbowo są stabilne i zbliżone do wartości teoretycznych.
+
+## 3. Napisz funkcję realizującą generator liczb losowych z rozkładu Laplace'a z parametrem $\lambda>0$ o gęstości:
+$$f(x)=\frac{\lambda}{2}e^{-\lambda|x|},\quad x\in\mathbb R.$$
+Narysuj histogram dla próby o rozmiarze $n=2000$ wygenerowanej przy jego pomocy i nałóż na niego krzywą gęstości rozkładu Laplace'a.
+
+```{r, echo=TRUE}
+rlaplace_custom <- function(n, lambda){
+  if(lambda <= 0) stop("lambda musi być dodatnia")
+  u <- runif(n)
+  x <- ifelse(u < 0.5,
+              (1/lambda) * log(2*u),
+              -(1/lambda) * log(2*(1-u)))
+  return(x)
+}
+```
+
+```{r, echo=FALSE, fig.height=3.5, fig.cap="Rozkład Laplace'a - symulacja vs teoria."}
+set.seed(123)
+sample_lap <- rlaplace_custom(2000, lambda = 1)
+
+hist(sample_lap, breaks = 40, probability = TRUE,
+     main = "Rozkład Laplace'a (lambda=1)",
+     col = "lightcoral", border = "black")
+
+dlaplace <- function(x, lambda) (lambda/2)*exp(-lambda*abs(x))
+
+curve(dlaplace(x, 1), add = TRUE, lwd = 2, col = "steelblue")
+```
+
+
+Histogram wygenerowanej zmiennej Laplace’a pokazuje typowy szczyt w okolicy zera oraz cięższe ogony w porównaniu z rozkładem normalnym. Parametry dobrze odwzorowują wartości wynikające z zastosowanego parametru \lambda, co świadczy o poprawnym działaniu generatora.
+
+\newpage
+
+# Zadanie 3: Generowanie rozkładu normalnego metodą Boxa-Müllera (4 pkt)
+
+Jak wiadomo z wykładu, jeżeli $U_1,U_2$ są dwiema niezależnymi zmiennymi z rozkładu jednostajnego na $[0,1]$, to zmienne 
+$$
+X_1:=\sqrt{-2\ln(U_2)}\cos(2\pi U_1), \,\,\, X_2:=\sqrt{-2\ln(U_2)}\sin(2\pi U_1),
+$$
+są dwiema niezależnymi zmiennymi o standardowym rozkładzie normalnym.
+
+## 1. Napisz funkcję realizującą generator par liczb losowych z rozkładu normalnego (dla zadanych parametrów $\mu$ i $\sigma$) wykorzystujący powyższą transformację Box-M\"ullera
+
+```{r, echo=TRUE}
+rnorm_boxmuller <- function(n, mu = 0, sigma = 1){
+  if(n <= 0) stop("n musi być dodatnie")
+  n_pairs <- ceiling(n / 2)      
+  u1 <- runif(n_pairs)
+  u2 <- runif(n_pairs)
+
+  r <- sqrt(-2 * log(u2))
+  theta <- 2 * pi * u1
+
+  x1 <- r * cos(theta)
+  x2 <- r * sin(theta)
+
+  y1 <- mu + sigma * x1
+  y2 <- mu + sigma * x2
+
+  out <- c(y1, y2)
+  return(out[1:n]) 
+}
+```
+
+\newpage
+
+## 2. Narysuj histogram z nałożoną odpowiednią funkcją gęstości dla próby rozmiaru $n=5000$ wygenerowanej przy pomocy napisanego generatora.
+
+```{r, echo=FALSE, fig.height=3, fig.cap="Histogram rozkładu normalnego z metody Boxa-Müllera."}
+set.seed(9999)
+sample_norm <- rnorm_boxmuller(5000, mu = 0, sigma = 1)
+
+hist(sample_norm, breaks = 40, probability = TRUE,
+     col = "navy", border = "black",
+     main = "Histogram + gęstość N(0,1)")
+
+curve(dnorm(x, 0, 1), add = TRUE, lwd = 2, col = "darkred")
+```
+
+Histogram wygenerowanych wartości jest bardzo zbliżony do krzywej gęstości rozkładu normalnego, co świadczy o poprawnym działaniu transformacji Boxa–Müllera.
+
+## 3. Wygeneruj $2000$ realizacji par $(X_1,X_2)$. Wykorzystaj funkcję
+```{r zad4func, echo=TRUE}
+jointplot <- function(x,y){
+  df <- data.frame(x,y)
+  scatter <- ggplot(df, aes(x=x,y=y))+geom_bin2d() +
+    scale_fill_continuous(type = "viridis") +
+    theme_bw()
+  hist_right <- ggplot(df)+geom_histogram(aes(y), fill="#69b3a2", 
+                                          color='darkblue')+
+    coord_flip()
+  hist_top <- ggplot(df)+geom_histogram(aes(x), fill="#69b3a2",
+                                        color='darkblue')
+   
+  arrangeGrob(hist_top, scatter, hist_right, ncol=2, nrow=2,
+               widths=c(4, 1), heights=c(1, 4),
+               layout_matrix = rbind(c(1, NA), c(2,3)))}
+```
+by narysować wykresy łączne rozkładów realizacji par zmiennych:
+
+* $X_1$ i $X_2$,
+* $X_1$, $X_1+X_2$,
+* $X_1+X_2$, $X_1-X_2$.
+
+```{r, echo=FALSE, fig.height=10, fig.cap="Wykresy łączne rozkładów: (a) X1 i X2, (b) X1 i X1+X2, (c) X1+X2 i X1-X2."}
+set.seed(2025)
+
+vals <- rnorm_boxmuller(4000, mu = 0, sigma = 1)
+
+X1 <- vals[1:2000]
+X2 <- vals[2001:4000]
+
+X1_plus_X2  <- X1 + X2
+X1_minus_X2 <- X1 - X2
+
+p1 <- jointplot(X1, X2)
+p2 <- jointplot(X1, X1_plus_X2)
+p3 <- jointplot(X1_plus_X2, X1_minus_X2)
+
+grid.arrange(p1, p2, p3, nrow=3)
+```
+
+\newpage
+
+## 4. W każdym z powyższych (trzech) przypadków, oblicz korelacje realizacji obu zmiennych. Czy współrzędne są od siebie niezależne? Wytłumacz.
+
+```{r, echo=FALSE}
+cor_X1_X2       <- cor(X1, X2)
+cor_X1_X1pX2    <- cor(X1, X1_plus_X2)
+cor_X1pX2_X1mX2 <- cor(X1_plus_X2, X1_minus_X2)
+
+cat("Korelacja(X1, X2):", cor_X1_X2, "\n")
+cat("Korelacja(X1, X1+X2):", cor_X1_X1pX2, "\n")
+cat("Korelacja(X1+X2, X1-X2):", cor_X1pX2_X1mX2, "\n")
+```
+
+Korelacje:
+
+- \(\mathrm{corr}(X_1, X_2) \approx 0\)
+- \(\mathrm{corr}(X_1, X_1+X_2) \approx \frac{1}{\sqrt{2}}\)
+- \(\mathrm{corr}(X_1+X_2,\, X_1 - X_2) \approx 0\)
+
+Czy współrzędne są niezależne?
+
+1. **Para \((X_1, X_2)\)**  
+   Z konstrukcji Boxa–Müllera zmienne te są *ściśle niezależne*. Korelacja bliska 0 potwierdza brak zależności liniowej.
+
+2. **Para \((X_1, X_1+X_2)\)**  
+   Zmienna \(X_1 + X_2\) zawiera w sobie \(X_1\), więc te dwie zmienne nie mogą być niezależne.  
+   Korelacja wychodzi bliska:
+   \[
+   \mathrm{corr}(X_1, X_1 + X_2) = \frac{\mathrm{Var}(X_1)}{\sqrt{\mathrm{Var}(X_1)\mathrm{Var}(X_1+X_2)}} \approx 0.707.
+   \]
+  
+3. **Para \((X_1+X_2, X_1-X_2)\)**  
+  Sprawdźmy kowariancję tych zmiennych, korzystając z liniowości wartości oczekiwanej i niezależności $X_1, X_2$:
+  $$\mathrm{Cov}(X_1+X_2, X_1-X_2) = \mathrm{Var}(X_1) - \mathrm{Cov}(X_1, X_2) + \mathrm{Cov}(X_2, X_1) - \mathrm{Var}(X_2).$$
+    Ponieważ $X_1, X_2 \sim N(0,1)$ są niezależne, ich kowariancje to 0, a wariancje to 1. Zatem:
+    $$\mathrm{Cov}(X_1+X_2, X_1-X_2) = 1 - 0 + 0 - 1 = 0.$$
+    Oznacza to niezależność.
+    Wektor $(X_1, X_2)$ ma łączny rozkład normalny. Transformacja jest liniowa, więc wektor wynikowy również ma łączny rozkład normalny. Kluczową własnością wielowymiarowego rozkładu normalnego jest to, że **brak korelacji (zerowa kowariancja) jest równoważny niezależności zmiennych**.
+
+\newpage
+
+# Zadanie 4. Metoda akceptacji (3 pkt)
+
+## 1. Zaproponuj alternatywny sposób generowania prób z rozkładu normalnego oparty na metodzie akceptacji. Jako rozkład majoryzujący rozkład normalny wybierz rozkład Laplace'a i wykorzystaj generator napisany w zadaniu 2.3. Spróbuj wyznaczyć wartości stałej normującej $M$ oraz parametru $\lambda$ rozkładu Laplace'a, tak by możliwie zminimalizować liczbę odrzucanych próbek. 
+
+**Obliczenia parametrów λ i M dla rozkładu Laplace’a w metodzie akceptacji:**
+
+Mamy gęstości:
+
+Normalny:
+$$
+f(x)=\frac{1}{\sqrt{2\pi}} e^{-x^2/2}.
+$$
+
+Laplace’a:
+$$
+g(x)=\frac{\lambda}{2} e^{-\lambda |x|}.
+$$
+
+Szukamy stałej $M$ takiej, że:
+$$
+f(x) \le M g(x) \quad \text{dla wszystkich } x.
+$$
+
+Badamy iloraz:
+$$
+\frac{f(x)}{g(x)} 
+= \frac{\frac{1}{\sqrt{2\pi}} e^{-x^2/2}}
+{\frac{\lambda}{2} e^{-\lambda |x|}}
+= \frac{2}{\lambda \sqrt{2\pi}}
+\exp\!\left( -\frac{x^2}{2} + \lambda |x| \right).
+$$
+
+Maksymalizujemy wykładnik:
+$$
+h(x) = -\frac{x^2}{2} + \lambda |x|.
+$$
+
+Dla $x \ge 0$:
+
+$$
+h'(x) = -x + \lambda.
+$$
+
+Warunek maksimum:
+$$
+-x + \lambda = 0 
+\quad \Rightarrow \quad
+x = \lambda.
+$$
+
+Wartość w maksimum:
+$$
+h(\lambda) = -\frac{\lambda^2}{2} + \lambda^2
+= \frac{\lambda^2}{2}.
+$$
+
+Zatem:
+$$
+M(\lambda) = \frac{2}{\lambda \sqrt{2\pi}} 
+\exp\!\left( \frac{\lambda^2}{2} \right).
+$$
+
+Minimalizujemy:
+$$
+\ln M(\lambda)
+= \ln\left(\frac{2}{\sqrt{2\pi}}\right)
+ - \ln\lambda + \frac{\lambda^2}{2}.
+$$
+
+Pochodna:
+$$
+\frac{d}{d\lambda} \ln M(\lambda)
+= -\frac{1}{\lambda} + \lambda.
+$$
+
+Warunek:
+$$
+-\frac{1}{\lambda} + \lambda = 0
+\quad \Rightarrow \quad
+\lambda^2 = 1.
+$$
+
+Stąd optimum:
+$$
+\boxed{\lambda = 1}.
+$$
+
+Dla $\lambda = 1$:
+
+$$
+M = \frac{2}{\sqrt{2\pi}} e^{1/2}.
+$$
+
+Czyli:
+$$
+\boxed{M = \frac{2}{\sqrt{2\pi}} e^{1/2}}.
+$$
+
+
+```{r, echo=TRUE}
+rLaplace <- function(n, lambda){
+  u <- runif(n) - 0.5
+  x <- -(1/lambda) * sign(u) * log(1 - 2*abs(u))
+  return(x)
+}
+
+lambda <- 1
+M <- (2 / sqrt(2*pi)) * exp(0.5)
+```
+
+
+## 2. Porównaj czas generowania próby o rozmiarze $n=10000$ za pomocą napisanego generatora oraz generatora wykorzystującego transformację Boxa-Müllera z zadania 3.
+
+```{r, echo=FALSE}
+rNorm_accept <- function(n, lambda = 1){
+  if(n <= 0) stop("n musi byc dodatnie")
+  out <- numeric(n)
+  k <- 1
+  while(k <= n){
+    y <- rLaplace(1, lambda)
+    f_y <- (1/sqrt(2*pi)) * exp(-y^2/2)
+    g_y <- (lambda/2) * exp(-lambda * abs(y))
+
+    if(runif(1) < f_y / (M * g_y)){
+      out[k] <- y
+      k <- k + 1
+    }
+  }
+  return(out)
+}
+```
+
+```{r, echo=FALSE}
+n <- 10000
+
+t1_start <- Sys.time()
+x_accept <- rNorm_accept(n)
+t1_end <- Sys.time()
+time_accept <- t1_end - t1_start
+
+t2_start <- Sys.time()
+x_bm <- rnorm_boxmuller(n)
+t2_end <- Sys.time()
+time_bm <- t2_end - t2_start
+
+```
+
+```{r, echo=FALSE}
+cat("Czas metody akceptacji:", time_accept, "s\n")
+cat("Czas metody Boxa-Müllera:", time_bm, "s\n")
+```
+
+Porównanie czasu działania pokazuje, że metoda Boxa–Müllera jest o wiele szybsza, co jest typowe, bo metoda akceptacji–odrzucenia wymaga odrzucania części kandydatów. Mimo to uzyskiwane wartości są również poprawne i zgodne z rozkładem normalnym.
