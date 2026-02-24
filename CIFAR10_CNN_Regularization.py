@@ -37,7 +37,7 @@ def build_model(use_bn=False, use_dropout=False):
     return model
 
 # 3. Trening 3 wariantów
-EPOCHS = 8
+EPOCHS = 15
 
 print("\n--- Model 1: BAZOWY ---")
 model_base = build_model()
@@ -77,3 +77,4 @@ plt.legend()
 plt.grid(True)
 
 plt.show()
+
