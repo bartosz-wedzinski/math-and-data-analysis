@@ -1,7 +1,7 @@
 ---
-title: "Metody Monte Carlo"
-subtitle: "Raport nr 1"
+title: "Monte Carlo RNG Algorithms"
 author: "Bartosz Wędziński"
+date: "11-12-2025"
 output:
   pdf_document:
     latex_engine: xelatex
@@ -22,7 +22,7 @@ header-includes:
   - \pagestyle{fancy}
   - \fancyhf{}
   - \rhead{\thepage}
-  - \lhead{RAPORT NR 1}
+  - \lhead{Monte Carlo RNG Algorithms}
   - \usepackage{setspace}
   - \usepackage{sectsty}
   - \allsectionsfont{\bfseries\sffamily\large}
@@ -41,9 +41,9 @@ knitr::opts_chunk$set(fig.align='center', fig.pos='H', warning=FALSE, message=FA
 
 \newpage
 
-# Zadanie 1: Symulacja dyskretnych zmiennych losowych (3 pkt)
+# Symulacja dyskretnych zmiennych losowych
 
-## 1. Napisz funkcję realizującą generator liczb losowych o rozkładzie dwupunktowym: $\mathbb P(X=1)=p$, $\mathbb P(X=0)=1-p$, gdzie $p\in [0,1]$.
+## Funkcja realizująca generator liczb losowych o rozkładzie dwupunktowym: $\mathbb P(X=1)=p$, $\mathbb P(X=0)=1-p$, gdzie $p\in [0,1]$.
 
 
 ```{r, echo=TRUE}
@@ -55,7 +55,7 @@ rbern <- function(n, p){
 }
 ```
 
-## 2. Napisz funkcję realizującą generator liczb losowych z rozkładu dwumianowego. Narysuj histogram dla przykładowej próby z tego rozkładu.
+## Funkcja realizująca generator liczb losowych z rozkładu dwumianowego + histogram.
 
 ```{r, echo=TRUE}
 rbinom_custom <- function(N, n, p){
@@ -76,7 +76,7 @@ Wyniki generowania zmiennej Bernoulliego zachowują się zgodnie z oczekiwaniami
 
 \newpage
 
-## 3. Napisz funkcję realizującą generator dla rozkładu Poissona (w raporcie zawrzyj obliczenia przygotowawcze). Narysuj histogram dla przykładowej próby z tego rozkładu.
+## Funkcja realizująca generator dla rozkładu Poissona + histogram.
 
 ```{r, echo=TRUE}
 rpois_custom <- function(n, lambda){
@@ -112,9 +112,9 @@ Generator rozkładu Poissona również działa poprawnie: histogram ma typowy mo
 
 \newpage
 
-# Zadanie 2: Symulacja ciągłych zmiennych losowych (4 pkt)
+# Symulacja ciągłych zmiennych losowych
 
-## 1. Zaimplementuj omówiony na wykładzie generator rozkładu wykładniczego. Narysuj histogram dla próby o rozmiarze $n=2000$ wygenerowanej przy jego pomocy i nałóż na niego krzywą gęstości rozkładu wykładniczego.
+## Generator rozkładu wykładniczego + histogram dla próby o rozmiarze $n=2000$ wygenerowanej przy jego pomocy z krzywą gęstości rozkładu wykładniczego.
 
 ```{r, echo=TRUE}
 rexp_custom <- function(n, lambda){
@@ -141,7 +141,7 @@ Histogram generowanej zmiennej wykazuje klasyczny kształt malejący wykładnicz
 
 \newpage
 
-## 2. Wyznacz dystrybuantę odwrotną dla rozkładu Weibulla o funkcji gęstości $$f(x)=\frac{k}{\lambda^k}x^{k-1}e^{-(x/\lambda)^k}\mathbf{1}_{(0,+\infty)}(x),\quad x\in \mathbb{R},$$ gdzie $k>0$, $\lambda>0$ (w raporcie zawrzyj odpowiednie obliczenia). Wykorzystaj ją do napisania funkcji realizującej generator liczb losowych z rozkładu Weibulla. Narysuj histogram dla próby o rozmiarze $n=2000$ wygenerowanej przy jego pomocy i nałóż na niego krzywą gęstości rozkładu Weibulla.
+## Wyznaczanie dystrybuanty odwrotnej dla rozkładu Weibulla o funkcji gęstości $$f(x)=\frac{k}{\lambda^k}x^{k-1}e^{-(x/\lambda)^k}\mathbf{1}_{(0,+\infty)}(x),\quad x\in \mathbb{R},$$ gdzie $k>0$, $\lambda>0$ + funkcja realizująca generator liczb losowych z rozkładu Weibulla + histogram dla próby o rozmiarze $n=2000$ wygenerowanej przy jego pomocy z krzywą gęstości rozkładu Weibulla.
 
 *Wyprowadzenie dystrybuanty odwrotnej dla rozkładu Weibulla:*
 
@@ -226,9 +226,9 @@ curve(dweibull(x, shape = 2, scale = 1), add = TRUE, lwd = 2, col = "red")
 
 Rozkład Weibulla ma wykres zależny od parametru kształtu k. Obserwujemy charakterystyczny wzrost gęstości, a następnie jej spadek. Wyniki liczbowo są stabilne i zbliżone do wartości teoretycznych.
 
-## 3. Napisz funkcję realizującą generator liczb losowych z rozkładu Laplace'a z parametrem $\lambda>0$ o gęstości:
+## Funkcja realizująca generator liczb losowych z rozkładu Laplace'a z parametrem $\lambda>0$ o gęstości:
 $$f(x)=\frac{\lambda}{2}e^{-\lambda|x|},\quad x\in\mathbb R.$$
-Narysuj histogram dla próby o rozmiarze $n=2000$ wygenerowanej przy jego pomocy i nałóż na niego krzywą gęstości rozkładu Laplace'a.
++ histogram dla próby o rozmiarze $n=2000$ wygenerowanej przy jego pomocy z krzywą gęstości rozkładu Laplace'a.
 
 ```{r, echo=TRUE}
 rlaplace_custom <- function(n, lambda){
@@ -259,15 +259,15 @@ Histogram wygenerowanej zmiennej Laplace’a pokazuje typowy szczyt w okolicy ze
 
 \newpage
 
-# Zadanie 3: Generowanie rozkładu normalnego metodą Boxa-Müllera (4 pkt)
+# Generowanie rozkładu normalnego metodą Boxa-Müllera
 
-Jak wiadomo z wykładu, jeżeli $U_1,U_2$ są dwiema niezależnymi zmiennymi z rozkładu jednostajnego na $[0,1]$, to zmienne 
+Jeżeli $U_1,U_2$ są dwiema niezależnymi zmiennymi z rozkładu jednostajnego na $[0,1]$, to zmienne 
 $$
 X_1:=\sqrt{-2\ln(U_2)}\cos(2\pi U_1), \,\,\, X_2:=\sqrt{-2\ln(U_2)}\sin(2\pi U_1),
 $$
 są dwiema niezależnymi zmiennymi o standardowym rozkładzie normalnym.
 
-## 1. Napisz funkcję realizującą generator par liczb losowych z rozkładu normalnego (dla zadanych parametrów $\mu$ i $\sigma$) wykorzystujący powyższą transformację Box-M\"ullera
+## Funkcja realizująca generator par liczb losowych z rozkładu normalnego (dla zadanych parametrów $\mu$ i $\sigma$) wykorzystujący powyższą transformację Box-M\"ullera.
 
 ```{r, echo=TRUE}
 rnorm_boxmuller <- function(n, mu = 0, sigma = 1){
@@ -292,7 +292,7 @@ rnorm_boxmuller <- function(n, mu = 0, sigma = 1){
 
 \newpage
 
-## 2. Narysuj histogram z nałożoną odpowiednią funkcją gęstości dla próby rozmiaru $n=5000$ wygenerowanej przy pomocy napisanego generatora.
+## Histogram z nałożoną funkcją gęstości dla próby rozmiaru $n=5000$ wygenerowanej przy pomocy generatora.
 
 ```{r, echo=FALSE, fig.height=3, fig.cap="Histogram rozkładu normalnego z metody Boxa-Müllera."}
 set.seed(9999)
@@ -307,8 +307,9 @@ curve(dnorm(x, 0, 1), add = TRUE, lwd = 2, col = "darkred")
 
 Histogram wygenerowanych wartości jest bardzo zbliżony do krzywej gęstości rozkładu normalnego, co świadczy o poprawnym działaniu transformacji Boxa–Müllera.
 
-## 3. Wygeneruj $2000$ realizacji par $(X_1,X_2)$. Wykorzystaj funkcję
-```{r zad4func, echo=TRUE}
+## Generowanie $2000$ realizacji par $(X_1,X_2)$ funkcją:
+
+```{r, echo=TRUE}
 jointplot <- function(x,y){
   df <- data.frame(x,y)
   scatter <- ggplot(df, aes(x=x,y=y))+geom_bin2d() +
@@ -324,7 +325,6 @@ jointplot <- function(x,y){
                widths=c(4, 1), heights=c(1, 4),
                layout_matrix = rbind(c(1, NA), c(2,3)))}
 ```
-by narysować wykresy łączne rozkładów realizacji par zmiennych:
 
 * $X_1$ i $X_2$,
 * $X_1$, $X_1+X_2$,
@@ -350,7 +350,7 @@ grid.arrange(p1, p2, p3, nrow=3)
 
 \newpage
 
-## 4. W każdym z powyższych (trzech) przypadków, oblicz korelacje realizacji obu zmiennych. Czy współrzędne są od siebie niezależne? Wytłumacz.
+## Obliczenie korelacji realizacji obu zmiennych + sprawdzenie niezależności.
 
 ```{r, echo=FALSE}
 cor_X1_X2       <- cor(X1, X2)
@@ -390,9 +390,9 @@ Czy współrzędne są niezależne?
 
 \newpage
 
-# Zadanie 4. Metoda akceptacji (3 pkt)
+# Metoda akceptacji
 
-## 1. Zaproponuj alternatywny sposób generowania prób z rozkładu normalnego oparty na metodzie akceptacji. Jako rozkład majoryzujący rozkład normalny wybierz rozkład Laplace'a i wykorzystaj generator napisany w zadaniu 2.3. Spróbuj wyznaczyć wartości stałej normującej $M$ oraz parametru $\lambda$ rozkładu Laplace'a, tak by możliwie zminimalizować liczbę odrzucanych próbek. 
+## Alternatywny sposób generowania prób z rozkładu normalnego oparty na metodzie akceptacji. Jako rozkład majoryzujący rozkład normalny wybierany rozkład Laplace'a. Wyznaczanie wartości stałej normującej $M$ oraz parametru $\lambda$ rozkładu Laplace'a, tak by możliwie zminimalizować liczbę odrzucanych próbek. 
 
 **Obliczenia parametrów λ i M dla rozkładu Laplace’a w metodzie akceptacji:**
 
@@ -501,7 +501,7 @@ M <- (2 / sqrt(2*pi)) * exp(0.5)
 ```
 
 
-## 2. Porównaj czas generowania próby o rozmiarze $n=10000$ za pomocą napisanego generatora oraz generatora wykorzystującego transformację Boxa-Müllera z zadania 3.
+## Porównanie czasu generowania próby o rozmiarze $n=10000$ za pomocą tego generatora oraz generatora wykorzystującego transformację Boxa-Müllera.
 
 ```{r, echo=FALSE}
 rNorm_accept <- function(n, lambda = 1){
@@ -543,3 +543,4 @@ cat("Czas metody Boxa-Müllera:", time_bm, "s\n")
 ```
 
 Porównanie czasu działania pokazuje, że metoda Boxa–Müllera jest o wiele szybsza, co jest typowe, bo metoda akceptacji–odrzucenia wymaga odrzucania części kandydatów. Mimo to uzyskiwane wartości są również poprawne i zgodne z rozkładem normalnym.
+
