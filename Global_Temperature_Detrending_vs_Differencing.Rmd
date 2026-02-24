@@ -1,13 +1,8 @@
 ---
-title: "Sprawozdanie 2 - Zadanie 3"
+title: "Global Temperature Detrending vs Differencing"
 author: "Bartosz Wędziński"
-date: "`r Sys.Date()`"
+date: "04-02-2026"
 output:
-  pdf_document:
-    latex_engine: xelatex
-    toc: true
-    number_sections: true
-    fig_caption: true
   html_document:
     theme: flatly
     highlight: tango
@@ -22,7 +17,7 @@ header-includes:
   - \pagestyle{fancy}
   - \fancyhf{}
   - \rhead{Bartosz Wędziński}
-  - \lhead{ZADANIE 3}
+  - \lhead{Global Temperature Detrending vs Differencing}
   - \cfoot{\thepage}
 ---
 
@@ -1732,5 +1727,6 @@ Kryteria AIC i FPE dały spójne wyniki, co potwierdza wiarygodność identyfika
 Test graficzny został zaimplementowany poprawnie, sprawdzając zarówno częstość przekroczeń przedziałów istotności (powinno być około 5\% dla α=0.05), jak i obecność ekstremalnych wartości (reguła 3-sigma).
 
 ---
+
 
 **Koniec sprawozdania**
