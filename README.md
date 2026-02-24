@@ -25,6 +25,19 @@ An in-depth autoregressive (AR) modeling project analyzing global temperature an
 * **Rigorous Diagnostics**: Validated model residuals using Ljung-Box tests, ACF visualizations (white noise evaluation), Shapiro-Wilk, and Jarque-Bera tests.
 * **Forecasting & Critical Analysis**: Generated 10-year inverse-transformed forecasts. Included a critical evaluation of prediction intervals, highlighting the "funnel of uncertainty" in differenced models versus the overconfident "tunnel" effect and overfitting risks associated with high-degree polynomial detrending.
 
-### Technologies:
+### Tools:
 * **R Libraries**: `astsa`, `forecast`, `tseries`, `ggplot2`, `gridExtra`, `knitr`, `kableExtra`, `dplyr`, `tidyr`, `nortest`.
-* **Techniques**: ARIMA/AR modeling, Statistical Hypothesis Testing, Predictive Uncertainty Analysis.
+
+# Monte Carlo RNG Algorithms
+
+This project focuses on the algorithmic implementation and mathematical derivation of random number generators (RNG) for various probability distributions, built entirely from scratch using only the standard uniform distribution (`runif`).
+
+### Key Highlights:
+* **Discrete Distributions**: Custom implementation of Bernoulli, Binomial, and Poisson generators using cumulative probability thresholds.
+* **Continuous Distributions (Inverse Transform Sampling)**: Mathematical derivation of the inverse CDF for the **Weibull** distribution and implementation for Exponential and Laplace distributions.
+* **Box-Muller Transform**: Bivariate normal distribution generation. Included empirical proof and joint-distribution visualizations to demonstrate the statistical independence of the generated variables.
+* **Acceptance-Rejection Method**: Designed a custom Normal distribution generator using Laplace as the majorizing function. Solved the calculus optimization problem to find the exact parameters ($M$ and $\lambda$) that minimize the rejection rate.
+* **Performance Benchmarking**: Comparative execution time analysis between the Box-Muller transform and the Acceptance-Rejection method.
+
+### Tools:
+* **R Libraries**: `knitr`, `xtabke`, `ggplot2`, `gridExtra`, `latex2exp` for mathematical data visualization.
