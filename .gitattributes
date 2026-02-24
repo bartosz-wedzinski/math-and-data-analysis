@@ -1,3 +1,5 @@
 *.html linguist-generated=true
 *.Rmd linguist-detectable=true
 *.Rmd linguist-language=R
+*.txt linguist-detectable=true
+*.txt linguist-language=txt
