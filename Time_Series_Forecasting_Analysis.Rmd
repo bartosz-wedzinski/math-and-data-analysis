@@ -1,13 +1,8 @@
 ---
-title: "Sprawozdanie 2 - Zadanie 4"
+title: "Time Series Forecasting Analysis"
 author: "Bartosz Wędziński"
-date: "`r Sys.Date()`"
+date: "05-02-2026"
 output:
-  pdf_document:
-    latex_engine: xelatex
-    toc: true
-    number_sections: true
-    fig_caption: true
   html_document:
     theme: flatly
     highlight: tango
@@ -25,7 +20,7 @@ header-includes:
   - \pagestyle{fancy}
   - \fancyhf{}
   - \rhead{Bartosz Wędziński}
-  - \lhead{ZADANIE 4}
+  - \lhead{Time Series Forecasting Analysis}
   - \cfoot{\thepage}
 ---
 
@@ -1479,4 +1474,5 @@ Rekomendacja: **STL + ARIMA**
 
 ---
 
-**Koniec sprawozdania**
+
+
