@@ -56,3 +56,20 @@ This technical report demonstrates advanced Monte Carlo simulation techniques, f
 
 ### Tools:
 * **R Libraries**: `knitr`, `xtable`, `ggplot2`, `gridExtra`, `latex2exp`, `randtoolbox`, `pracma`, `ggExtra`, `grid`, `tidyr`, `dplyr`.
+
+---
+
+# CIFAR10 CNN Regularization
+
+A Deep Learning experiment built with TensorFlow and Keras, focusing on the impact of different regularization and normalization techniques on Convolutional Neural Networks (CNNs) using the CIFAR-10 image dataset.
+
+### Key Highlights:
+* **CNN Architecture**: Designed a multi-layer Convolutional Neural Network for multi-class image classification.
+* **Experimental Design**: Conducted a comparative analysis of three model variants:
+    1. **Baseline Model**: Standard CNN architecture.
+    2. **Batch Normalization**: Integrated BN layers to accelerate training and stabilize learning dynamics.
+    3. **Dropout Regularization**: Applied Dropout layers to prevent network overfitting.
+* **Performance Evaluation**: Visualized validation accuracy and validation loss trajectories using Matplotlib to assess the generalization capabilities of each technique.
+
+### Tools:
+* **Python**, `TensorFlow`, `Keras`, `Matplotlib`, `NumPy`.
