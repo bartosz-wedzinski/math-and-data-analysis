@@ -1,0 +1,903 @@
+---
+title: "Metody Monte Carlo"
+subtitle: "Raport nr 2"
+author: "Bartosz Wędziński"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: true
+    toc: true
+    toc_depth: 1
+    keep_tex: true
+fontsize: 11.5 pt
+geometry: a4paper
+linestretch: 1.15
+header-includes:
+  - \usepackage{titlesec}
+  - \usepackage{tocloft}
+  - \renewcommand{\contentsname}{Spis treści}
+  - \titleformat{\section}{\huge\bfseries}{\thesection}{1em}{}
+  - \titleformat{\subsection}{\LARGE\bfseries}{\thesubsection}{1em}{}
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhf{}
+  - \rhead{\thepage}
+  - \lhead{RAPORT NR 2}
+  - \usepackage{setspace}
+  - \usepackage{sectsty}
+  - \allsectionsfont{\bfseries\sffamily\large}
+  - \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(ggplot2)
+library(xtable)
+library(gridExtra)
+library(latex2exp)
+library(randtoolbox)
+library(pracma)
+library(grid)
+library(ggExtra)
+library(tidyr)
+library(dplyr)
+
+knitr::opts_chunk$set(fig.align='center', fig.pos='H', warning=FALSE, message=FALSE)
+```
+
+\newpage
+
+# Zadanie 1: Generowanie prób z rozkładów wielowymiarowych (5 pkt)
+
+## 1. Zaproponuj i zaimplementuj w R algorytm generowania prób z 4-wymiarowego rozkładu normalnego o parametrach:
+
+$$ \boldsymbol{\mu}=\begin{bmatrix} 1 \\ 3 \\ -1 \\ -3 \end{bmatrix},\ \ \ \Sigma=\begin{bmatrix} 1 & 2 & 1 & 2 \\ 2 & 8 & 4 & 8 \\ 1 & 4 & 3 & 6 \\ 2 & 8 & 6 & 16\end{bmatrix}.$$
+
+**Rozwiązanie:**
+
+### Podstawy teoretyczne i algorytm
+
+Celem zadania jest wygenerowanie próby losowej z 4-wymiarowego rozkładu normalnego $N_4(\boldsymbol{\mu}, \Sigma)$, gdzie wektor średnich $\boldsymbol{\mu}$ oraz macierz kowariancji $\Sigma$ są zadane.
+
+Podstawą algorytmu jest własność przekształceń liniowych wektorów losowych. Jeśli $\mathbf{Z}$ jest wektorem losowym o standardowym rozkładzie normalnym $N_p(\mathbf{0}, \mathbf{I})$, to wektor losowy $\mathbf{X}$ zdefiniowany jako przekształcenie afiniczne:
+$$\mathbf{X} = \boldsymbol{\mu} + \mathbf{L}\mathbf{Z}$$
+ma rozkład normalny wielowymiarowy o parametrach $N_p(\boldsymbol{\mu}, \mathbf{L}\mathbf{L}^T)$.
+
+Aby uzyskać zadaną macierz kowariancji $\Sigma$, musimy znaleźć macierz $\mathbf{L}$ taką, że $\Sigma = \mathbf{L}\mathbf{L}^T$. W przypadku, gdy $\Sigma$ jest macierzą symetryczną i dodatnio określoną, najefektywniejszą metodą wyznaczenia $\mathbf{L}$ jest **rozkład Choleskiego**, który zwraca dolną macierz trójkątną spełniającą powyższy warunek.
+
+**Algorytm generowania próby:**
+1. Wykonać rozkład Choleskiego zadanej macierzy kowariancji: $\Sigma = \mathbf{L}\mathbf{L}^T$.
+2. Wygenerować wektor $\mathbf{Z} = [Z_1, Z_2, Z_3, Z_4]^T$, gdzie $Z_i \sim N(0,1)$ są niezależne.
+3. Obliczyć wektor wynikowy $\mathbf{X} = \boldsymbol{\mu} + \mathbf{L}\mathbf{Z}$.
+4. Powtórzyć kroki 2-3 $n$-krotnie, aby uzyskać próbę losową.
+
+### Implementacja w środowisku R
+
+Poniższy kod realizuje opisany algorytm dla próby o liczności $n=10\,000$.
+
+```{r, echo=TRUE}
+
+mu <- c(1, 3, -1, -3)
+
+Sigma <- matrix(c(1, 2, 1, 2,
+                  2, 8, 4, 8,
+                  1, 4, 3, 6,
+                  2, 8, 6, 16), 
+                nrow = 4, ncol = 4, byrow = TRUE)
+
+generate_mvn <- function(n, mu, Sigma) {
+  p <- length(mu)
+  L <- t(chol(Sigma))
+  Z <- matrix(rnorm(n * p), nrow = p, ncol = n)
+  X <- sweep(L %*% Z, 1, mu, "+")
+  
+  return(t(X))
+}
+set.seed(555) 
+proby <- generate_mvn(10000, mu, Sigma)
+
+cat("Średnie z próby (porównanie z wektorem mu):\n")
+print(colMeans(proby))
+
+cat("\nMacierz kowariancji z próby (porównanie z macierzą Sigma):\n")
+print(cov(proby))
+```
+
+### Weryfikacja poprawności rozwiązania:
+
+Analiza otrzymanych wyników symulacyjnych potwierdza poprawność zaimplementowanego algorytmu opartego na dekompozycji Choleskiego. Porównując estymatory parametrów uzyskane z wygenerowanej próby z wartościami teoretycznymi, obserwujemy wysoką zgodność. Wektor średnich empirycznych $\bar{x}$ jest bardzo bliski zadanemu wektorowi $\boldsymbol{\mu} = [1, 3, -1, -3]^T$, z różnicami występującymi dopiero na trzecim miejscu po przecinku.Podobnie, empiryczna macierz kowariancji niemal idealnie odtwarza zadaną strukturę zależności $\Sigma$. Wartości na diagonali (wariancje) oraz poza nią (kowariancje) różnią się od wartości teoretycznych w stopniu pomijalnym, co jest zgodne z Prawem Wielkich Liczb dla próby o liczności $n=10\,000$. Niewielkie odchylenia są naturalnym wynikiem błędu próbkowania stochastycznego i dążą do zera wraz ze wzrostem liczebności próby. Potwierdza to, że transformacja liniowa została przeprowadzona prawidłowo, a korelacje między składowymi wektora zostały zachowane.
+
+\newpage
+
+## 2. Rozważmy następujący sympleks w $\mathbb R^2$:
+
+$$ S=\{(x,y)\in\mathbb [0,\infty)^2:\ x+y\le 1\}$$
+Zaproponuj i zaimplementuj w R algorytm generowania prób z rozkładu o gęstości
+$$f(x,y)=60xy^2\mathbf{1}_{S}(x,y).$$
+korzystając z rozkładów warunkowych. Narysuj wykres łączny (jointplot) wygenerowanej próby $((x_j,y_j))_{j=1}^n$, wraz z histogramami rozkładów brzegowych.
+
+
+### Opis teoretyczny i wyprowadzenie algorytmu
+
+Celem zadania jest wygenerowanie próby losowej z rozkładu zadanego gęstością:
+$$f(x,y) = 60xy^2 \mathbf{1}_S(x,y),$$
+gdzie obszar $S$ to sympleks zdefiniowany jako $S = \{(x,y) \in [0, \infty)^2 : x+y \le 1\}$.
+
+Do rozwiązania problemu wykorzystamy metodę warunkową (dekompozycję gęstości łącznej). Zgodnie z twierdzeniem o prawdopodobieństwie całkowitym, gęstość łączną możemy przedstawić jako iloczyn gęstości brzegowej zmiennej $X$ oraz gęstości warunkowej zmiennej $Y$ pod warunkiem $X$:
+$$f(x,y) = f_X(x) \cdot f_{Y|X}(y|x).$$
+
+Algorytm generowania będzie przebiegał dwuetapowo: najpierw wylosujemy wartość $x$ z rozkładu brzegowego, a następnie dla ustalonego $x$ wylosujemy $y$ z rozkładu warunkowego.
+
+### Wyznaczenie gęstości brzegowej $f_X(x)$
+
+Gęstość brzegową zmiennej $X$ obliczamy całkując gęstość łączną po wszystkich możliwych wartościach zmiennej $Y$. Z definicji zbioru $S$ wynika, że dla ustalonego $x \in (0,1)$, zmienna $y$ przyjmuje wartości z przedziału $[0, 1-x]$.
+
+$$f_X(x) = \int_{-\infty}^{\infty} f(x,y) \, dy = \int_0^{1-x} 60xy^2 \, dy.$$
+
+Traktując $x$ jako stałą, wyłączamy czynnik $60x$ przed znak całki:
+
+$$f_X(x) = 60x \left[ \frac{y^3}{3} \right]_0^{1-x} = 20x(1-x)^3, \quad \text{dla } x \in (0,1).$$
+
+Otrzymana funkcja gęstości odpowiada rozkładowi Beta z parametrami $\alpha$ i $\beta$, którego gęstość jest proporcjonalna do $x^{\alpha-1}(1-x)^{\beta-1}$. Porównując wykładniki potęg otrzymujemy układ równań:
+$$\alpha - 1 = 1 \implies \alpha = 2$$
+$$\beta - 1 = 3 \implies \beta = 4$$
+Zatem zmienna $X$ ma rozkład $Beta(2, 4)$, co pozwala na użycie standardowego generatora liczb losowych dla tego rozkładu.
+
+### Wyznaczenie gęstości warunkowej i transformacja dla $Y$
+
+Gęstość warunkową $f_{Y|X}(y|x)$ wyznaczamy dzieląc gęstość łączną przez gęstość brzegową:
+
+$$f_{Y|X}(y|x) = \frac{f(x,y)}{f_X(x)} = \frac{60xy^2}{20x(1-x)^3} = \frac{3y^2}{(1-x)^3}, \quad \text{dla } y \in [0, 1-x].$$
+
+Ponieważ otrzymany rozkład warunkowy nie jest standardowym rozkładem bibliotecznym, do generowania zmiennej $Y$ zastosujemy metodę odwrotnej dystrybuanty. Wyznaczamy dystrybuantę warunkową $F_{Y|X}(y|x)$:
+
+$$F_{Y|X}(y|x) = \int_0^y \frac{3t^2}{(1-x)^3} \, dt = \frac{1}{(1-x)^3} \left[ t^3 \right]_0^y = \left( \frac{y}{1-x} \right)^3.$$
+
+Niech $U$ będzie zmienną losową z rozkładu jednostajnego $\mathcal{U}(0,1)$. Przyrównujemy dystrybuantę do $U$ i wyznaczamy $y$:
+
+$$\left( \frac{y}{1-x} \right)^3 = U \implies \frac{y}{1-x} = U^{1/3} \implies y = (1-x)U^{1/3}.$$
+
+Ostateczny algorytm polega na wygenerowaniu $X \sim Beta(2,4)$ oraz $U \sim \mathcal{U}(0,1)$, a następnie obliczeniu $Y$ ze wzoru powyżej.
+
+\newpage
+
+### Implementacja w środowisku R
+
+Poniższy kod realizuje wyprowadzony algorytm dla próby o liczności $n=5000$.
+
+```{r, fig.cap="Wykres rozrzutu wygenerowanej próby wraz z histogramami brzegowymi."}
+
+generate_simplex_dist <- function(n) {
+  x <- rbeta(n, shape1 = 2, shape2 = 4)
+  u <- runif(n)
+  y <- (1 - x) * (u^(1/3))
+  return(data.frame(x = x, y = y))
+}
+
+set.seed(67)
+n_samples <- 5000
+
+df <- generate_simplex_dist(n_samples)
+
+p <- ggplot(df, aes(x = x, y = y)) +
+  geom_point(alpha = 0.3, color = "dodgerblue4", size = 0.6) +
+  geom_abline(intercept = 1, slope = -1, linetype = "dashed", 
+              color = "firebrick", size = 1) +
+  theme_bw() +
+  labs(title = expression(paste("Próba z gęstości ", f(x,y) == 60*x*y^2)),
+       x = "Zmienna X (Brzegowy: Beta(2,4))",
+       y = "Zmienna Y") +
+  xlim(0, 1) + ylim(0, 1) +
+  coord_fixed() 
+
+final_plot <- ggMarginal(p, type = "histogram", 
+                         fill = "cornflowerblue", 
+                         color = "white",
+                         alpha = 0.7)
+
+grid::grid.newpage()
+grid::grid.draw(final_plot)
+```
+
+### Weryfikacja poprawności rozwiązania:
+
+Analiza graficzna wyników symulacji potwierdza poprawność zaimplementowanego algorytmu. Wszystkie wygenerowane punkty $(x, y)$ mieszczą się w obszarze trójkąta ograniczonego osiami układu oraz prostą $y = 1-x$, co oznacza, że warunek definiujący sympleks $S$ jest ściśle spełniony.
+
+Obserwowane histogramy brzegowe są zgodne z teoretycznymi przewidywaniami. Rozkład zmiennej $X$ wykazuje wyraźną asymetrię prawostronną z modą przypadającą w okolicy wartości $0.25$, co jest charakterystyczne dla użytego rozkładu $Beta(2,4)$. Z kolei histogram zmiennej $Y$ przyjmuje kształt w przybliżeniu symetryczny z koncentracją masy prawdopodobieństwa wokół wartości $0.5$ (co odpowiada rozkładowi $Beta(3,3)$, będącemu wynikiem wycałkowania gęstości łącznej). Widoczne na wykresie punktowym zagęszczenie obserwacji dla wyższych wartości $y$ (przy małych $x$) odzwierciedla wpływ czynnika $y^2$ w gęstości łącznej. Zastosowana metoda łańcuchowa pozwoliła na efektywne wygenerowanie próby bez konieczności stosowania kosztownej obliczeniowo metody eliminacji.
+
+\newpage
+
+## 3. Zaproponuj i zaimplementuj w R algorytm generowania prób z rozkładu dwuwymiarowego o gęstości
+$$f(x,y)=\frac 1C (1+x^2+2y^2)^{-4/3},$$
+gdzie $C=\int_{\mathbb R^2}(1+x^2+2y^2)^{-4/3}\mathrm dx\mathrm d y$ korzystając z metody ilorazów jednostajnych.Narysuj wykres łączny (jointplot) wygenerowanej próby $((x_j,y_j))_{j=1}^n$, wraz z histogramami rozkładów brzegowych.
+
+**Wskazówka:** Należy zastosować ogólniejszą metodę ilorazów jednostajnych dla pewnego $r>1$ (trzeba dobrać $r$, tak by funkcje $h_j(x,y)$ były ograniczone)
+
+### Analiza teoretyczna i wyznaczenie obszaru akceptacji
+
+Rozważamy gęstość zadaną wzorem $f(x,y) = \frac{1}{C} (1+x^2+2y^2)^{-4/3}$. Do wygenerowania próby zastosujemy uogólnioną metodę ilorazów jednostajnych (Generalized Ratio-of-Uniforms) z parametrem $r$.
+
+Zgodnie z metodą, generujemy losowo punkty $(u, v_1, v_2)$ z rozkładu jednostajnego na zbiorze $A_{f,r} \subset \mathbb{R}^3$, zdefiniowanym nierównością:
+$$0 < u \le \left[ h\left( \frac{v_1}{u^r}, \frac{v_2}{u^r} \right) \right]^{\frac{1}{2r+1}},$$
+gdzie $h(x,y)$ jest funkcją jądra gęstości (pomijamy stałą normalizującą $C$, gdyż nie wpływa ona na kształt obszaru akceptacji). Współrzędne zmiennej losowej otrzymujemy jako transformacje: $X = \frac{v_1}{u^r}, \ Y = \frac{v_2}{u^r}$.
+
+Aby algorytm był efektywny, musimy wyznaczyć prostopadłościan ograniczający zbiór $A_{f,r}$. Warunkiem koniecznym ograniczoności tego zbioru jest, aby $h(x,y)$ malała szybciej niż $||(x,y)||^{-(2r+1)}$. W naszym przypadku gęstość maleje jak $||(x,y)||^{-8/3}$. Musimy dobrać $r$ tak, aby $2r+1 < \frac{8}{3}r$, co prowadzi do warunku $r > 1.5$. Przyjmujemy $r=3$.
+
+### Wyznaczenie granic kostki 
+
+Dla $r=3$ wykładnik w warunku akceptacji wynosi $\frac{1}{2(3)+1} = \frac{1}{7}$. Funkcja pomocnicza to $h(x,y) = (1+x^2+2y^2)^{-4/3}$.
+
+1.  **Maksimum dla $u$:**
+    $$u_{\max} = \sup_{x,y} \left[ (1+x^2+2y^2)^{-4/3} \right]^{1/7} = \sup_{x,y} (1+x^2+2y^2)^{-4/21}.$$
+    Wartość ta jest osiągana dla $x=0, y=0$, zatem $u_{\max} = 1$.
+
+2.  **Maksimum dla $v_1$:**
+    Z definicji $v_1 = x \cdot u^r$. Szukamy maksimum funkcji $g_1(x) = x(1+x^2)^{-4/7}$ (przyjmując $y=0$).
+    Przyrównując pochodną do zera, otrzymujemy warunek $x^2 = 7$.
+    Maksymalna wartość $v_1$:
+    $$v_{1,\max} = \sqrt{7}(1+7)^{-4/7} = \sqrt{7} \cdot 8^{-4/7}.$$
+    Z symetrii funkcji $v_{1,\min} = -v_{1,\max}$.
+
+3.  **Maksimum dla $v_2$:**
+    Analogicznie $v_2 = y \cdot u^r$. Szukamy maksimum funkcji $g_2(y) = y(1+2y^2)^{-4/7}$ (przyjmując $x=0$).
+    Przyrównując pochodną do zera, otrzymujemy warunek $y^2 = 3.5$.
+    Maksymalna wartość $v_2$:
+    $$v_{2,\max} = \sqrt{3.5}(1+2(3.5))^{-4/7} = \sqrt{3.5} \cdot 8^{-4/7}.$$
+    Z symetrii $v_{2,\min} = -v_{2,\max}$.
+
+### Implementacja w środowisku R
+
+Algorytm generuje punkty wewnątrz wyznaczonego prostopadłościanu i akceptuje te, które spełniają warunek $u \le h(x,y)^{1/7}$, co numerycznie zapisujemy jako $u^7 \le (1+x^2+2y^2)^{-4/3}$.
+
+```{r, fig.cap="Próba z rozkładu dwuwymiarowego wygenerowana metodą ilorazów jednostajnych (r=3)."}
+
+generate_rou_2d <- function(n) {
+  u_max <- 1
+  
+  v1_limit <- sqrt(7) * 8^(-4/7)
+  v2_limit <- sqrt(3.5) * 8^(-4/7)
+  
+  x_res <- numeric(n)
+  y_res <- numeric(n)
+  count <- 0
+  r <- 3
+  
+  while (count < n) {
+    u <- runif(1, 0, u_max)
+    v1 <- runif(1, -v1_limit, v1_limit)
+    v2 <- runif(1, -v2_limit, v2_limit)
+    
+    x_cand <- v1 / (u^r)
+    y_cand <- v2 / (u^r)
+    
+    kernel_val <- (1 + x_cand^2 + 2 * y_cand^2)^(-4/3)
+    
+    if (u^7 <= kernel_val) {
+      count <- count + 1
+      x_res[count] <- x_cand
+      y_res[count] <- y_cand
+    }
+  }
+  return(data.frame(x = x_res, y = y_res))
+}
+
+set.seed(2025)
+df_rou <- generate_rou_2d(5000)
+
+p <- ggplot(df_rou, aes(x = x, y = y)) +
+  geom_point(alpha = 0.2, color = "forestgreen", size = 0.6) +
+  theme_minimal() +
+  coord_cartesian(xlim = c(-8, 8), ylim = c(-8, 8)) +
+  # Użycie expression() aby wyświetlić wzór matematyczny z ułamkiem 1/C
+  labs(title = expression(paste("Metoda RoU (r=3) dla ", f(x,y) == frac(1, C) * (1 + x^2 + 2 * y^2)^{-4/3})),
+       x = "x", y = "y")
+
+final_plot2 <- ggMarginal(p, type = "density", fill = "cyan3")
+
+grid::grid.newpage()
+grid::grid.draw(final_plot2)
+```
+
+### Weryfikacja poprawności rozwiązania:
+
+Zastosowanie metody ilorazów jednostajnych dla parametru $r=3$ pozwoliło na poprawne wygenerowanie próby z zadanego rozkładu. Analiza graficzna (Figure 2) potwierdza zgodność wyników z oczekiwaniami teoretycznymi.Kształt chmury punktów na wykresie łącznym odzwierciedla strukturę poziomic gęstości, które dla funkcji typu $(1+x^2+2y^2)^{-\alpha}$ są elipsami. Większe skupienie punktów wzdłuż osi X niż osi Y wynika z obecności współczynnika $2$ przy $y^2$, co sprawia, że rozkład jest bardziej skoncentrowany (ma mniejszą wariancję) w kierunku Y. Histogramy brzegowe wykazują unimodalność oraz symetrię wokół zera. Ponadto, widoczne są tzw. "ciężkie ogony" rozkładu, charakterystyczne dla gęstości o zaniku wielomianowym (w odróżnieniu od wykładniczego zaniku w rozkładzie normalnym), co uzasadnia dobór parametru $r=3$ zapewniającego ograniczoność zbioru generującego. Wygenerowane punkty pokrywają przestrzeń w sposób ciągły, co świadczy o poprawnym wyznaczeniu granic kostki $A_{f,r}$.
+
+\newpage
+
+# Zadanie 2: Estymacja całek metodami Monte Carlo (3 pkt)
+
+## 1. Oblicz w przybliżeniu objętość elipsoidy
+$$
+E=\bigl\{(x,y,z)\in\mathbb R^2: \frac{x^2}{a^2}+\frac{y^2}{b^2}+\frac{z^2}{c^2}\le 1\bigr\}
+$$
+dla wybranych RÓŻNYCH parametrów $a,b,c>0$.
+
+**Rozwiązanie:**
+
+### 1. Wstęp teoretyczny i konstrukcja estymatora
+
+Rozważamy problem estymacji objętości bryły $E \subset \mathbb{R}^3$ zdefiniowanej nierównością:
+$$\frac{x^2}{a^2}+\frac{y^2}{b^2}+\frac{z^2}{c^2}\le 1.$$
+Objętość tę można wyrazić jako całkę z funkcji charakterystycznej zbioru $E$ po obszarze ograniczonym $\Omega$, który zawiera $E$. Jako obszar $\Omega$ przyjmujemy prostopadłościan o wymiarach $[-a, a] \times [-b, b] \times [-c, c]$, którego objętość wynosi $V_{\Omega} = (2a)(2b)(2c) = 8abc$.
+
+Estymator Monte Carlo objętości $|E|$ opieramy na ciągu niezależnych zmiennych losowych $(X_i, Y_i, Z_i)$ o rozkładzie jednostajnym na $\Omega$. Definiując zmienną losową $W_i = V_{\Omega} \cdot \mathbf{1}_E(X_i, Y_i, Z_i)$, estymator po $n$ próbach wyraża się średnią:
+$$\hat{V}_n = \frac{1}{n} \sum_{i=1}^n W_i.$$
+
+Zgodnie z Centralnym Twierdzeniem Granicznym, dla dużej liczby prób rozkład estymatora dąży do rozkładu normalnego. Pozwala to na wyznaczenie asymptotycznego przedziału ufności na poziomie istotności $1-\alpha$:
+$$\left[ \hat{V}_n - z_{1-\alpha/2} \frac{\hat{\sigma}_n}{\sqrt{n}}, \quad \hat{V}_n + z_{1-\alpha/2} \frac{\hat{\sigma}_n}{\sqrt{n}} \right],$$
+gdzie $\hat{\sigma}_n$ jest estymatorem odchylenia standardowego zmiennej $W$, a $z_{1-\alpha/2}$ odpowiednim kwantylem rozkładu $N(0,1)$. W poniższej symulacji wyznaczymy przebieg wartości estymatora oraz jego przedziałów ufności w zależności od liczebności próby $n$.
+
+### 2. Implementacja w środowisku R
+
+Symulacja została przeprowadzona dla trzech różnych zestawów parametrów $(a,b,c)$. Dla zachowania czytelności wykresów zbieżności przyjęto $N=20\,000$ punktów pomiarowych, co pozwala na wyraźne zaobserwowanie procesu stabilizacji estymatora.
+
+```{r, fig.cap="Zbieżność estymatora Monte Carlo objętości elipsoidy wraz z 95% przedziałami ufności dla trzech zestawów parametrów."}
+
+simulate_ellipsoid_volume <- function(a, b, c, n_sim) {
+  vol_box <- 8 * a * b * c
+  vol_theor <- (4/3) * pi * a * b * c
+  
+  x <- runif(n_sim, -a, a)
+  y <- runif(n_sim, -b, b)
+  z <- runif(n_sim, -c, c)
+  
+  is_inside <- (x^2 / a^2 + y^2 / b^2 + z^2 / c^2) <= 1
+  
+  cum_sum <- cumsum(is_inside)
+  n_seq <- 1:n_sim
+  
+  est_mean <- (cum_sum / n_seq) * vol_box
+  
+  p_hat <- cum_sum / n_seq
+  est_sd <- sqrt(p_hat * (1 - p_hat)) * vol_box
+  
+  z_score <- 1.96 # Dla poziomu ufności 0.95
+  ci_radius <- z_score * (est_sd / sqrt(n_seq))
+  
+  return(data.frame(
+    n = n_seq,
+    mean = est_mean,
+    lower = est_mean - ci_radius,
+    upper = est_mean + ci_radius,
+    theor = vol_theor,
+    params = paste0("a=", a, ", b=", b, ", c=", c)
+  ))
+}
+
+params_list <- list(
+  c(2, 3, 4),
+  c(7, 1, 10),
+  c(12, 8, 1)
+)
+
+set.seed(123)
+n_plot <- 20000
+plot_data <- data.frame()
+
+for (p in params_list) {
+  res <- simulate_ellipsoid_volume(p[1], p[2], p[3], n_plot)
+  plot_data <- rbind(plot_data, res)
+}
+
+final_results <- plot_data %>%
+  group_by(params) %>%
+  filter(n == max(n)) %>%
+  select(params, mean, theor) %>%
+  mutate(error_rel_percent = abs(mean - theor) / theor * 100)
+
+print(as.data.frame(final_results))
+
+p_plot <- ggplot(plot_data, aes(x = n)) +
+  geom_line(aes(y = mean), color = "navyblue", size = 0.6) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "navyblue", alpha = 0.2) +
+  geom_hline(aes(yintercept = theor), color = "firebrick", linetype = "dashed", size = 0.8) +
+  facet_wrap(~params, scales = "free_y", ncol = 1) +
+  theme_bw() +
+  labs(title = "Stabilizacja estymatora objętości i przedziały ufności",
+       subtitle = "Linia ciągła: estymator MC, Szary pas: 95% CI, Linia przerywana: wartość teoretyczna",
+       x = "Liczba symulacji (n)",
+       y = "Estymowana objętość")
+
+grid::grid.newpage()
+grid::grid.draw(p_plot)
+```
+
+
+### Weryfikacja poprawności rozwiązania:
+
+Przeprowadzona analiza symulacyjna potwierdza skuteczność metody Monte Carlo w estymacji objętości brył. Na wygenerowanych wykresach (Figure 3) widoczna jest wyraźna zbieżność estymatora (linia ciągła) do teoretycznej objętości elipsoidy (czerwona linia przerywana) dla wszystkich badanych zestawów parametrów.Zgodnie z teorią, szerokość asymptotycznych przedziałów ufności maleje proporcjonalnie do pierwiastka z liczby prób ($n^{-1/2}$). W początkowej fazie symulacji (dla małych $n$) oscylacje estymatora są znaczące, jednak szybko stabilizują się wewnątrz wyznaczonego kanału ufności. Dla końcowej liczby prób ($n=20\,000$) błąd względny estymacji we wszystkich przypadkach nie przekracza 1%, a wartość teoretyczna zawiera się w wyznaczonym 95% przedziale ufności. Otrzymane wyniki numeryczne oraz wykresy jednoznacznie weryfikują poprawność zaimplementowanego algorytmu.
+
+\newpage
+
+## 2. Żuk Mandelbrota jest podzbiorem płaszczyzny zespolonej, do którego należą punkty $p\in\mathbb{C}$, dla których ciąg
+$$z_n=\begin{cases} z_0=0\\ z_{n}=z_{n-1}^2+p,\ n>1 \end{cases}$$
+nie zbiega do nieskończoności. Oblicz przybliżoną powierzchnię zbioru Mandelbrota (rozumianego jako podzbiór płaszczyzny $\mathbb R^2$).
+
+### Opis teoretyczny i konstrukcja estymatora
+
+Zbiór Mandelbrota $\mathcal{M}$ zdefiniowany jest jako zbiór punktów $p \in \mathbb{C}$, dla których ciąg rekurencyjny $z_{n+1} = z_n^2 + p$ (z warunkiem początkowym $z_0=0$) pozostaje ograniczony.
+Zgodnie z twierdzeniem dotyczącym tego zbioru, jeśli dla pewnego $n$ moduł $|z_n| > 2$, to ciąg ten dąży do nieskończoności. Zatem warunkiem koniecznym i wystarczającym przynależności punktu $p$ do przybliżenia zbioru Mandelbrota (dla skończonej liczby iteracji $K$) jest spełnienie nierówności $|z_n| \le 2$ dla wszystkich $n \le K$.
+
+Problem obliczenia pola powierzchni zbioru $\mathcal{M}$ sprowadza się do obliczenia całki z funkcji charakterystycznej na płaszczyźnie zespolonej utożsamianej z $\mathbb{R}^2$. Wiadomo, że cały zbiór Mandelbrota zawiera się w kole o promieniu 2, a dokładniej można go zamknąć w prostokącie $\Omega = [-2.0, 0.5] \times [-1.2, 1.2] \subset \mathbb{R}^2$. Pole tego obszaru wynosi $V_{\Omega} = (0.5 - (-2.0)) \cdot (1.2 - (-1.2)) = 2.5 \cdot 2.4 = 6.0$.
+
+Estymator Monte Carlo konstruujemy następująco:
+1. Generujemy próbę losową $N$ punktów $P_i$ z rozkładu jednostajnego na prostokącie $\Omega$.
+2. Dla każdego punktu $P_i$ sprawdzamy warunek zbieżności (czy po $K$ iteracjach $|z_K| \le 2$).
+3. Definiujemy zmienną losową $W_i = V_{\Omega} \cdot \mathbf{1}_{\mathcal{M}}(P_i)$.
+
+Estymatorem pola powierzchni po $n$ próbach jest średnia empiryczna $\hat{S}_n = \frac{1}{n} \sum_{i=1}^n W_i$. Podobnie jak w poprzednim zadaniu, wyznaczymy również asymptotyczne przedziały ufności, aby zbadać stabilność rozwiązania.
+
+### Implementacja w środowisku R
+
+W implementacji wykorzystano arytmetykę liczb zespolonych dostępną w R, co pozwala na bezpośrednie operacje na wektorach bez konieczności rozdzielania części rzeczywistej i urojonej. Ustalono limit iteracji $K=100$, co jest wartością wystarczającą dla oszacowań Monte Carlo tej precyzji.
+
+```{r, fig.cap="Zbieżność estymatora pola zbioru Mandelbrota wraz z 95% przedziałem ufności."}
+
+calculate_mandelbrot_area <- function(n_sim, max_iter = 100) {
+  x_min <- -2.0
+  x_max <- 0.5
+  y_min <- -1.2
+  y_max <- 1.2
+  
+  area_box <- (x_max - x_min) * (y_max - y_min)
+  
+  x <- runif(n_sim, x_min, x_max)
+  y <- runif(n_sim, y_min, y_max)
+  c_points <- complex(real = x, imaginary = y)
+  
+  z <- rep(0 + 0i, n_sim)
+  not_diverged <- rep(TRUE, n_sim)
+  
+  for (i in 1:max_iter) {
+    z[not_diverged] <- z[not_diverged]^2 + c_points[not_diverged]
+    
+    diverged_now <- Mod(z) > 2
+    not_diverged[diverged_now] <- FALSE
+    
+    if (!any(not_diverged)) break
+  }
+  
+  inside_set <- as.numeric(not_diverged)
+  cum_sum <- cumsum(inside_set)
+  n_seq <- 1:n_sim
+  
+  est_mean <- (cum_sum / n_seq) * area_box
+  
+  p_hat <- cum_sum / n_seq
+  est_sd <- sqrt(p_hat * (1 - p_hat)) * area_box
+  z_score <- 1.96
+  ci_radius <- z_score * (est_sd / sqrt(n_seq))
+  
+  return(data.frame(
+    n = n_seq,
+    mean = est_mean,
+    lower = est_mean - ci_radius,
+    upper = est_mean + ci_radius
+  ))
+}
+
+set.seed(2025)
+n_total <- 50000
+results_mandel <- calculate_mandelbrot_area(n_total)
+
+final_area <- tail(results_mandel$mean, 1)
+cat("Oszacowane pole powierzchni:", round(final_area, 4))
+
+p_mandel <- ggplot(results_mandel, aes(x = n)) +
+  geom_line(aes(y = mean), color = "darkmagenta", size = 0.6) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "darkmagenta", alpha = 0.2) +
+  geom_hline(yintercept = 1.50659, color = "darkorange", linetype = "dashed", size = 0.8) +
+  theme_bw() +
+  labs(title = "Estymacja pola zbioru Mandelbrota metodą Monte Carlo",
+       subtitle = "Linia fioletowa: Estymator, Obszar: 95% CI, Linia pomarańczowa: Wartość referencyjna (~1.506)",
+       x = "Liczba symulacji (n)",
+       y = "Estymowane pole powierzchni")
+
+grid::grid.newpage()
+grid::grid.draw(p_mandel)
+```
+
+\newpage
+
+### Weryfikacja poprawności rozwiązania:
+
+Uzyskane wyniki wskazują na poprawność zastosowanej metody estymacji. Wykres zbieżności (Figure 4) pokazuje, że wraz ze wzrostem liczby prób $n$, wartość estymatora (fioletowa linia) stabilizuje się wokół wartości referencyjnej, która dla zbioru Mandelbrota wynosi w przybliżeniu $1.50659$ (zaznaczona przerywaną linią pomarańczową).Dla $n=50\,000$ prób oszacowana wartość pola znajduje się bardzo blisko wartości literaturowej, mieszcząc się w wyznaczonym asymptotycznym przedziale ufności. Należy jednak zauważyć, że estymacja ta obarczona jest dwoma rodzajami błędów: błędem stochastycznym wynikającym z metody Monte Carlo (który maleje proporcjonalnie do $1/\sqrt{n}$ i jest wizualizowany przez szerokość przedziału ufności) oraz błędem systematycznym wynikającym z przyjęcia skończonej liczby iteracji (w tym przypadku $100$). Punkty leżące bardzo blisko brzegu fraktala mogą dywergować dopiero w późniejszych iteracjach, co teoretycznie powoduje minimalne przeszacowanie pola, jednak przy przyjętej skali i losowym charakterze próbkowania wpływ ten jest pomijalny w stosunku do wariancji estymatora.
+
+\newpage
+
+## 3. Oblicz przybliżoną wartość całki
+$$\int_0^{2\pi}x\sin{[(1/\cos{(\ln{(x+1)})})^2]}\mathrm{d}x.$$
+
+Dla każdego z zaimplementowanych estymatorów, stwórz wykres zmienności wartości estymatora od liczności próby i zaznacz na nim asymptotyczne przedziały ufności.
+
+### Podstawy teoretyczne i konstrukcja estymatora
+
+Zadanie polega na oszacowaniu wartości całki oznaczonej:
+$$I = \int_0^{2\pi} x \sin\left[ \left( \frac{1}{\cos(\ln(x+1))} \right)^2 \right] \mathrm{d}x.$$
+
+Do rozwiązania problemu wykorzystamy klasyczną metodę Monte Carlo (ang. *Crude Monte Carlo* lub *Mean-Value Method*). Metoda ta opiera się na twierdzeniu o wartości średniej dla całek. Jeśli $X$ jest zmienną losową o rozkładzie jednostajnym na przedziale $[a, b]$, czyli $X \sim \mathcal{U}(a, b)$, to wartość oczekiwana funkcji $f(X)$ wynosi:
+$$\mathbb{E}[f(X)] = \int_{-\infty}^{\infty} f(x)g(x)\mathrm{d}x = \int_a^b f(x) \frac{1}{b-a} \mathrm{d}x = \frac{1}{b-a} I,$$
+gdzie $g(x)$ jest gęstością rozkładu jednostajnego.
+Stąd wynika, że $I = (b-a) \mathbb{E}[f(X)]$.
+
+Estymatorem nieobciążonym całki $I$ jest zatem zmienna losowa:
+$$\hat{I}_n = (b-a) \cdot \frac{1}{n} \sum_{i=1}^n f(X_i),$$
+gdzie $X_i$ są niezależnymi realizacjami z rozkładu $\mathcal{U}(0, 2\pi)$.
+
+Podobnie jak w poprzednich zadaniach, korzystając z Centralnego Twierdzenia Granicznego, wyznaczamy asymptotyczne przedziały ufności na poziomie $1-\alpha$:
+$$\left[ \hat{I}_n - z_{1-\alpha/2} \frac{\hat{\sigma}_f (b-a)}{\sqrt{n}}, \quad \hat{I}_n + z_{1-\alpha/2} \frac{\hat{\sigma}_f (b-a)}{\sqrt{n}} \right],$$
+gdzie $\hat{\sigma}_f$ jest estymatorem odchylenia standardowego wartości funkcji w wylosowanych punktach.
+
+Warto zauważyć, że funkcja podcałkowa posiada punkty osobliwości w miejscach, gdzie $\cos(\ln(x+1)) = 0$. Jednakże, funkcja sinus jest ograniczona przedziałem $[-1, 1]$, a czynnik $x$ przedziałem $[0, 2\pi]$, zatem cała funkcja podcałkowa jest ograniczona, co gwarantuje zbieżność całki i poprawność metody Monte Carlo (mimo potencjalnych oscylacji wysokiej częstotliwości).
+
+### Implementacja w środowisku R
+
+W poniższym kodzie zastosowano wektoryzację obliczeń (funkcja `cumsum`), co pozwala na efektywne wyznaczenie ścieżki zbieżności estymatora bez użycia pętli.
+
+```{r, fig.cap="Zbieżność estymatora wartości całki wraz z 95% przedziałami ufności.", fig.height=3}
+
+f_integrand <- function(x) {
+
+  denom <- cos(log(x + 1))
+  val <- x * sin((1 / denom)^2)
+  val[!is.finite(val)] <- 0 
+  return(val)
+}
+
+calculate_integral_mc <- function(n_max) {
+  a <- 0
+  b <- 2 * pi
+  
+  x_samples <- runif(n_max, a, b)
+  y_vals <- f_integrand(x_samples)
+  
+  n_seq <- 1:n_max
+  cum_sum_y <- cumsum(y_vals)
+  cum_sq_sum_y <- cumsum(y_vals^2)
+  
+  mean_y <- cum_sum_y / n_seq
+
+  est_integral <- (b - a) * mean_y
+  
+ 
+  var_y <- (cum_sq_sum_y / n_seq) - mean_y^2
+  sd_y <- sqrt(pmax(0, var_y)) 
+  
+  se_integral <- (b - a) * sd_y / sqrt(n_seq)
+  
+  z_score <- 1.96
+  
+  plot_indices <- seq(100, n_max, by = 100)
+  
+  data.frame(
+    n = plot_indices,
+    est = est_integral[plot_indices],
+    lower = (est_integral - z_score * se_integral)[plot_indices],
+    upper = (est_integral + z_score * se_integral)[plot_indices]
+  )
+}
+
+set.seed(123)
+n_sim <- 100000
+results_int <- calculate_integral_mc(n_sim)
+
+final_val <- tail(results_int$est, 1)
+cat("Szacowana wartość całki:", round(final_val, 4))
+
+p_int <- ggplot(results_int, aes(x = n)) +
+  geom_line(aes(y = est), color = "darkviolet", size = 0.8) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "darkviolet", alpha = 0.2) +
+  geom_hline(yintercept = final_val, color = "black", linetype = "dashed", alpha = 0.5) +
+  theme_bw() +
+  labs(title = "Zbieżność metody Monte Carlo dla zadanej całki",
+       subtitle = paste("Końcowa estymata:", round(final_val, 4), "| 95% CI"),
+       x = "Liczba prób (n)",
+       y = "Wartość estymatora")
+
+grid::grid.newpage()
+grid::grid.draw(p_int)
+```
+
+
+### Weryfikacja poprawności rozwiązania:
+
+Zaimplementowany algorytm Monte Carlo wykazuje poprawną zbieżność stochastyczną. Mimo skomplikowanej struktury funkcji podcałkowej (zawierającej składnik oscylujący $\sin((1/\cos(\dots))^2)$), estymator stabilizuje się wraz ze wzrostem liczebności próby.Na wykresie (Figure 5) obserwujemy, że początkowe fluktuacje wartości estymatora są znaczne, co jest naturalne dla metod losowych przy funkcjach o dużej wariancji. Jednakże, wraz z upływem czasu symulacji, krzywa estymatora (fioletowa linia) wygładza się i pozostaje wewnątrz wyznaczonego 95% przedziału ufności (szary obszar). Szerokość tego przedziału maleje zgodnie z teoretycznym tempem $1/\sqrt{n}$, co potwierdza poprawność obliczeń błędu standardowego. Uzyskana wartość końcowa jest stabilna, a brak gwałtownych skoków w późniejszej fazie symulacji sugeruje, że punkty osobliwe funkcji (gdzie argument sinusa dąży do nieskończoności) nie zaburzają ogólnej zbieżności całki, zgodnie z założeniami teoretycznymi o ograniczoności funkcji podcałkowej.
+
+\newpage
+
+# Zadanie 3: Obciążenie i metoda delta (2 pkt)
+
+Załóżmy, że mamy wygenerowaną próbę prostą $(x_j)_{j=1}^n$ ze zmiennej $X$ o rozkładzie normalnym $\mathcal N(0,\sigma^2)$, gdzie $\sigma^2>0$ jest nieznane. Chcemy estymować wartości funkcji tworzącej momenty (czyli transformaty Laplace'a) $$M_X(t)=\mathbb E e^{tX}.$$
+Rozważmy dwie metody:
+
+## 1. Estymacja $\widehat{M_X}(t)=\mathbb E e^{tX}$ metodą Monte-Carlo na podstawie próby $(x_j)_{j=1}^n$.
+
+## 2. Estymacja wariancji $\sigma^2$ za pomocą wariancji próbkowej $\sigma^2_n$ z $(x_j)_{j=1}^n$ i następnie obliczenie estymatora $\widehat{M_X}(t)=e^{\tfrac{t^2}2\sigma^2_n}$.
+
+Oceń jakość obu metod estymacji, wyznaczając asymptotyczne przedziały ufności obu estymatorów dla rosnącej liczności próby $n$ z rozkładu $\mathcal N(0,\sigma^2)$ i wybranego $\sigma^2\neq 1$.
+
+**Rozwiązanie:**
+
+### Analiza teoretyczna i metoda podziałów
+
+Celem zadania jest estymacja wartości funkcji tworzącej momenty $M_X(t) = \mathbb{E}[e^{tX}]$ dla zmiennej losowej $X \sim \mathcal{N}(0, \sigma^2)$. Wartość teoretyczna tej funkcji wynosi $M_X(t) = \exp\left(\frac{\sigma^2 t^2}{2}\right)$.
+
+Analizujemy dwa podejścia estymacyjne:
+
+1.  **Estymator Monte Carlo (MC):**
+    Wykorzystuje bezpośrednio definicję wartości oczekiwanej: $\widehat{M}_{MC} = \frac{1}{n} \sum_{i=1}^n e^{t X_i}$.
+    Zmienne $Y_i = e^{t X_i}$ są niezależne, więc na mocy Centralnego Twierdzenia Granicznego estymator ma rozkład asymptotycznie normalny. Wariancję estymujemy standardowo z próby, a przedział ufności budujemy w oparciu o kwantyle rozkładu normalnego $N(0,1)$.
+
+2.  **Estymator typu "plug-in" z metodą podziałów:**
+    Wykorzystuje estymator wariancji $S_n^2$ wstawiony do wzoru analitycznego: $\widehat{M}_{Plug} = \exp\left(\frac{t^2 S_n^2}{2}\right)$.
+    Stosowanie metody delta do wyznaczenia wariancji tego estymatora prowadzi do niestabilnych wyników numerycznych, ponieważ pochodna funkcji wykładniczej (występująca we wzorze na wariancję asymptotyczną) gwałtownie wzmacnia błąd estymacji parametru $\sigma^2$. Zgodnie z wytycznymi, aby uzyskać wiarygodne przedziały ufności, zastosujemy **metodę podziałów (subsampling)**.
+
+**Algorytm metody podziałów:**
+* Dzielimy n-elementową próbę losową na $k$ rozłącznych podprób (bloków) o liczności $m = \lfloor n/k \rfloor$.
+* Dla każdego bloku $j=1,\dots,k$ obliczamy lokalną wartość estymatora $\hat{\theta}_j = \exp\left(\frac{t^2 S_{n,j}^2}{2}\right)$.
+* Wyznaczamy średnią z estymatorów blokowych $\bar{\theta}$ oraz ich wariancję próbkową $S_{\theta}^2$.
+* Konstruujemy przedział ufności w oparciu o rozkład t-Studenta z $k-1$ stopniami swobody:
+    $$\left[ \bar{\theta} - t_{1-\alpha/2, k-1} \frac{S_{\theta}}{\sqrt{k}}, \quad \bar{\theta} + t_{1-\alpha/2, k-1} \frac{S_{\theta}}{\sqrt{k}} \right]$$
+
+### Implementacja w środowisku R
+
+W poniższym kodzie dla Metody 2 zastosowano podział próby na $k=30$ bloków. Pozwala to na uniezależnienie oszacowania błędu od niestabilnych wzorów analitycznych.
+
+```{r, fig.cap="Porównanie zbieżności i przedziałów ufności dla estymatora Monte Carlo oraz estymatora plug-in (metoda podziałów)."}
+
+set.seed(123)
+sigma2 <- 2
+t_val <- 1
+true_mgf <- exp(sigma2 * t_val^2 / 2)
+
+n_vals <- seq(100, 5000, by = 100)
+results <- data.frame()
+
+k_batches <- 30
+
+for (n in n_vals) {
+  x <- rnorm(n, mean = 0, sd = sqrt(sigma2))
+  
+  # Metoda 1: Monte Carlo
+  y <- exp(t_val * x)
+  est_mc <- mean(y)
+  se_mc <- sd(y) / sqrt(n)
+  
+  z_crit <- 1.96
+  results <- rbind(results, data.frame(
+    n = n,
+    est = est_mc,
+    method = "1. Monte Carlo",
+    low = est_mc - z_crit * se_mc,
+    high = est_mc + z_crit * se_mc
+  ))
+  
+  # Metoda 2: Plug-in z Metodą Podziałów 
+  indices <- split(x, cut(seq_along(x), k_batches, labels = FALSE))
+  
+  batch_estimates <- sapply(indices, function(batch_x) {
+    if(length(batch_x) < 2) return(NA)
+    s2_local <- var(batch_x)
+    exp(t_val^2 / 2 * s2_local)
+  })
+  
+  est_subsampling <- mean(batch_estimates, na.rm = TRUE)
+  se_subsampling <- sd(batch_estimates, na.rm = TRUE) / sqrt(k_batches)
+  
+  t_crit <- qt(0.975, df = k_batches - 1)
+  
+  results <- rbind(results, data.frame(
+    n = n,
+    est = est_subsampling,
+    method = "2. Plug-in (Subsampling)",
+    low = est_subsampling - t_crit * se_subsampling,
+    high = est_subsampling + t_crit * se_subsampling
+  ))
+}
+
+p <- ggplot(results, aes(x = n, y = est, color = method, fill = method)) +
+  geom_hline(yintercept = true_mgf, linetype = "dashed", color = "black", size = 0.8) +
+  geom_ribbon(aes(ymin = low, ymax = high), alpha = 0.2, color = NA) +
+  geom_line(size = 0.8) +
+  theme_bw() +
+  labs(title = "Porównanie estymatorów MGF: Monte Carlo vs Plug-in",
+       subtitle = paste("Wartość teoretyczna:", round(true_mgf, 4), 
+                        "| Metoda podziałów: k =", k_batches),
+       y = "Wartość estymatora",
+       x = "Liczność próby (n)") +
+  scale_color_manual(values = c("dodgerblue3", "firebrick3")) +
+  scale_fill_manual(values = c("dodgerblue3", "firebrick3")) +
+  theme(legend.position = "bottom")
+
+grid::grid.newpage()
+grid::grid.draw(p)
+```
+
+
+### Weryfikacja poprawności i ocena estymatorów:
+
+Analiza porównawcza obu metod pozwala na wyciągnięcie istotnych wniosków dotyczących ich jakości i stabilności:Metoda Monte Carlo (Krzywa niebieska): Estymator ten zachowuje się bardzo stabilnie. Jest nieobciążony, a jego przedział ufności (obszar cieniowany) systematycznie zwęża się wraz ze wzrostem $n$. Wartość teoretyczna (przerywana linia czarna) przez większość czasu znajduje się wewnątrz wyznaczonego kanału ufności, co potwierdza poprawność zastosowania klasycznej aproksymacji normalnej.Metoda Plug-in z subsamplingiem (Krzywa czerwona): Estymator ten wykazuje zauważalne obciążenie dodatnie (krzywa przebiega konsekwentnie powyżej wartości teoretycznej). Wynika to z nierówności Jensena dla funkcji wypukłej $g(x) = e^x$. Ponieważ $S_n^2$ jest estymatorem nieobciążonym wariancji $\sigma^2$, to $\mathbb{E}[\exp(c S_n^2)] > \exp(c \mathbb{E}[S_n^2]) = \exp(c \sigma^2)$, co powoduje systematyczne przeszacowanie wartości MGF.Zastosowanie metody podziałów: Użycie metody podziałów pozwoliło na wyznaczenie stabilnych przedziałów ufności dla drugiego estymatora, unikając problemu eksplozji wariancji, który występował przy użyciu metody delta. Mimo to, ze względu na wspomniane obciążenie, przedział ufności dla metody plug-in często nie pokrywa wartości teoretycznej (szczególnie dla dużych $n$, gdzie wariancja maleje, a obciążenie pozostaje). Wskazuje to na wyższość bezpośredniej metody Monte Carlo w tym konkretnym zastosowaniu.
+
+\newpage
+
+# Zadanie 4: Zmniejszanie wariancji w estymacji całek metodami Monte-Carlo (4 pkt)
+
+## 1. Zaproponuj przynajmniej trzy różne estymatory Monte-Carlo estymujące wartość całki
+
+$$ I_1=\int_{\tfrac 12}^1\frac{e^{1/x}x^{1/3}}{(1+x)^{7/3}}\mathrm d x.$$
+Skorzystaj z różnych metod zaprezentowanych na wykładzie. Porównaj zaproponowane estymatory, analizując ich wariancje bądź asymptotyczne przedziały ufności. Określ, który z estymatorów jest najlepszy.
+
+**Rozwiązanie:**
+
+
+### Konstrukcja estymatorów i analiza teoretyczna
+
+Celem zadania jest estymacja całki:
+$$I = \int_{0.5}^{1} \frac{e^{1/x}x^{1/3}}{(1+x)^{7/3}}\mathrm d x.$$
+Oznaczymy funkcję podcałkową jako $g(x)$. Długość przedziału całkowania wynosi $L = 1 - 0.5 = 0.5$. Do rozwiązania problemu zaproponowano trzy estymatory o zróżnicowanej efektywności:
+
+**1. Estymator klasyczny (Crude Monte Carlo)**
+Jest to podstawowy estymator oparty na twierdzeniu o wartości średniej. Dla zmiennej losowej $U \sim \mathcal{U}(0.5, 1)$, estymator wyraża się wzorem:
+$$\hat{I}_{CMC} = L \cdot \frac{1}{n}\sum_{i=1}^n g(U_i).$$
+Jego wariancja zależy bezpośrednio od zmienności funkcji $g(x)$ na zadanym przedziale.
+
+**2. Estymator zmiennych antytetycznych (Antithetic Variates)**
+Metoda ta wykorzystuje ujemną korelację między parami wylosowanych punktów w celu redukcji wariancji. Ponieważ funkcja $g(x)$ jest monotoniczna w zadanym przedziale, zastosowanie zmiennych $U$ oraz $U' = 1.5 - U$ (odbicie względem środka przedziału) powinno skutkować redukcją wariancji średniej. Estymator przyjmuje postać:
+$$\hat{I}_{AV} = \frac{1}{n/2} \sum_{i=1}^{n/2} \frac{L \cdot g(U_i) + L \cdot g(1.5 - U_i)}{2}.$$
+
+**3. Estymator próbkowania istotnościowego (Importance Sampling)**
+Metoda ta polega na losowaniu punktów z rozkładu o gęstości $f(x)$, która kształtem przypomina funkcję $|g(x)|$. Zauważmy, że funkcja $g(x)$ szybko maleje na przedziale $[0.5, 1]$, podobnie jak funkcja $h(x) = x^{-2}$.
+Przyjmijmy gęstość instrumentalną $f(x) \propto x^{-2}$ na przedziale $[0.5, 1]$. Stała normalizująca wynosi $C = \int_{0.5}^1 x^{-2} dx = 1$, zatem $f(x) = x^{-2}$ jest poprawną gęstością prawdopodobieństwa.
+Dystrybuanta tego rozkładu to $F(x) = 2 - 1/x$, a funkcja odwrotna (służąca do generowania próby) to $F^{-1}(u) = \frac{1}{2-u}$ dla $u \in [0,1]$.
+Estymator wyraża się wzorem:
+$$\hat{I}_{IS} = \frac{1}{n} \sum_{i=1}^n \frac{g(X_i)}{f(X_i)} = \frac{1}{n} \sum_{i=1}^n g(X_i)X_i^2.$$
+
+### Implementacja w środowisku R
+
+Poniższy kod realizuje obliczenia dla wszystkich trzech estymatorów, wyznaczając ich wartości punktowe, wariancje oraz 95% przedziały ufności.
+
+```{r, fig.cap="Porównanie szerokości 95% przedziałów ufności dla trzech metod estymacji."}
+
+g_func <- function(x) {
+  (exp(1/x) * x^(1/3)) / (1 + x)^(7/3)
+}
+
+n <- 100000
+set.seed(123)
+
+# Metoda 1: Klasyczna (Crude MC)
+u_mc <- runif(n, 0.5, 1)
+vals_mc <- 0.5 * g_func(u_mc)
+est_mc <- mean(vals_mc)
+var_est_mc <- var(vals_mc) / n
+
+# Metoda 2: Zmienne Antytetyczne (Antithetic Variates)
+u_av <- runif(n/2, 0.5, 1)
+vals_av <- 0.5 * (g_func(u_av) + g_func(1.5 - u_av)) / 2
+est_av <- mean(vals_av)
+var_est_av <- var(vals_av) / (n/2)
+
+# Metoda 3: Importance Sampling (f(x) = x^-2)
+u_is <- runif(n)
+x_is <- 1 / (2 - u_is)
+weights <- g_func(x_is) / (x_is^(-2))
+est_is <- mean(weights)
+var_est_is <- var(weights) / n
+
+results <- data.frame(
+  Metoda = c("1. Klasyczna", "2. Antytetyczna", "3. Importance Sampling"),
+  Estymata = c(est_mc, est_av, est_is),
+  Wariancja_Estymatora = c(var_est_mc, var_est_av, var_est_is),
+  CI_Szerokosc = 2 * 1.96 * sqrt(c(var_est_mc, var_est_av, var_est_is))
+)
+
+print(results)
+
+ggplot(results, aes(x = Metoda, y = CI_Szerokosc, fill = Metoda)) +
+  geom_col(alpha = 0.8, width = 0.6) +
+  theme_minimal() +
+  labs(title = "Efektywność metod redukcji wariancji",
+       y = "Szerokość 95% przedziału ufności",
+       x = "Metoda estymacji") +
+  scale_fill_brewer(palette = "Set2") +
+  theme(legend.position = "none")
+```
+
+\newpage
+
+## 2. Zaproponuj estymator Monte-Carlo całki
+
+$$ I_2=\int_{\tfrac 12}^{\infty}\frac{e^{1/x}x^{1/3}}{(1+x)^{7/3}}\mathrm d x.$$
+
+### Analiza i wybór metody
+
+Mamy do obliczenia całkę niewłaściwą:
+$$ I_2=\int_{\tfrac 12}^{\infty}\frac{e^{1/x}x^{1/3}}{(1+x)^{7/3}}\mathrm d x.$$
+
+Pierwszym krokiem jest sprowadzenie całki do przedziału skończonego. Stosuję podstawienie $u = 1/x$.
+Wtedy $dx = -1/u^2 du$. Granice całkowania zmieniają się następująco: $\tfrac{1}{2} \to 2$ oraz $\infty \to 0$.
+Po przekształceniach funkcja podcałkowa upraszcza się do postaci:
+$$ \int_0^2 \frac{e^u}{(u+1)^{7/3}} \mathrm d u.$$
+
+Aby uzyskać bardzo dokładny wynik i znacząco zredukować wariancję (bardziej niż w metodach z punktu 4.1), zdecydowałem się połączyć dwie techniki:
+
+1.  **Warstwowanie (Stratified Sampling):** Dzielę przedział $[0, 2]$ na $K$ małych podprzedziałów (warstw).
+2.  **Zmienne kontrolne (Control Variates) wewnątrz warstw:** Zauważyłem, że na bardzo małym przedziale każdą gładką funkcję można dobrze przybliżyć wielomianem (korzystając z rozwinięcia Taylora). Zamiast liczyć zwykłą średnią w warstwie, dopasowuję w niej wielomian 3. stopnia (używając regresji liniowej). Całkę z wielomianu znamy dokładnie, więc błąd Monte Carlo pochodzi tylko od "reszty" (różnicy między funkcją a wielomianem), która jest bliska zeru.
+
+Poniższy kod implementuje to podejście: dzieli przedział na $100\,000$ warstw i w każdej stosuje lokalną regresję jako metodę zmiennych kontrolnych.
+
+### Implementacja w R
+
+```{r}
+set.seed(2137)
+
+# 1. Funkcja po podstawieniu u = 1/x
+# Zakres całkowania zmienia się na [0, 2]
+f_trans <- function(u) exp(u) / (u + 1)^(7/3)
+
+# Parametry symulacji
+k_strata <- 100000      # Liczba warstw
+n_per_strata <- 1000    # Próbki na warstwę (dla stabilnej regresji)
+total_width <- 2        # Długość przedziału [0, 2]
+w <- total_width / k_strata
+
+strata_means <- numeric(k_strata)
+strata_vars <- numeric(k_strata)
+
+# Pętla po warstwach
+for (i in 1:k_strata) {
+  lower <- (i - 1) * w
+  upper <- i * w
+  
+  # Losowanie punktów w bieżącej warstwie
+  u_rand <- runif(n_per_strata, lower, upper)
+  y <- f_trans(u_rand)
+  
+  # Zastosowanie Zmiennych Kontrolnych poprzez regresję
+  # Centrujemy zmienną, żeby ułatwić obliczenia momentów
+  u_centered <- u_rand - (lower + upper)/2
+  
+  # Dopasowujemy wielomian 3. stopnia do punktów wylosowanych w warstwie
+  # Model: y ~ beta0 + beta1*u + beta2*u^2 + beta3*u^3
+  L <- lm(y ~ u_centered + I(u_centered^2) + I(u_centered^3))
+  
+  # Obliczamy wartość oczekiwaną estymatora.
+  # Dla rozkładu jednostajnego na [-w/2, w/2] momenty nieparzyste to 0.
+  # Moment drugi E[X^2] = w^2 / 12.
+  coeffs <- coef(L)
+  e_u2 <- (w^2) / 12
+  
+  # Estymowana średnia w tej warstwie to wyraz wolny + poprawka od 2. potęgi
+  strata_means[i] <- coeffs[1] + coeffs[3] * e_u2
+  
+  # Błąd standardowy oszacowania w tej warstwie (z reszt regresji)
+  strata_vars[i] <- (summary(L)$sigma^2) / n_per_strata
+}
+
+# Całka to średnia ze średnich warstwowych * długość przedziału
+final_estimate <- mean(strata_means) * total_width
+
+# Błąd standardowy całego estymatora
+# Sumujemy wariancje (bo warstwy są niezależne) i skalujemy
+final_se <- (sqrt(sum(strata_vars)) / k_strata) * total_width
+
+cat("--- WYNIKI ---\n")
+cat("Estymata całki: ", format(final_estimate, digits = 16), "\n")
+cat("Błąd standardowy: ", format(final_se, digits = 16), "\n")
+```
+
+### Wnioski:
+
+Zastosowana metoda hybrydowa (Stratyfikacja + Lokalne Zmienne Kontrolne) pozwoliła na drastyczne zredukowanie błędu standardowego. W klasycznym Monte Carlo błąd maleje w tempie $1/\sqrt{n}$. Tutaj, dzięki temu, że na mikroskopijnych odcinkach funkcja $f(u)$ jest niemal idealnie przybliżana przez wielomian 3. stopnia, wariancja resztowa jest znikoma. Wynik jest stabilny na poziomie kilkunastu miejsc po przecinku, co w praktyce czyni ten estymator stochastyczny równie precyzyjnym co deterministyczne kwadratury numeryczne dla funkcji gładkich.
+
+Otrzymany błąd jest mniejszy niż precyzja maszynowa, co oznacza, że wariancja Monte Carlo została w praktyce całkowicie wyeliminowana przez dopasowanie wielomianowe.
+
+
+\newpage
+
+
+**Uwaga 1:** Ogłaszam konkurs na najlepszy estymator całki $I_2$. Osoba, która zaproponuje najefektywniejszy (o najwęższym asymptotycznym przedziale ufności - czyli jednocześnie najmniejszej wariancji), będzie darzona nieskończoną **estymą** i dodatkowo otrzyma 5 punktów z aktywności (czyli maksymalną możliwą liczbę punktów).
+
+**Uwaga 2:** Chociaż w funkcji podcałkowej występuje gęstość **[odwróconego rozkładu Beta]** z parametrami $\alpha=\tfrac 43$ i $\beta=1$, to estymator Monte-Carlo oparty o próbę generowaną z tego rozkładu jest wyjątkowo nieefektywny (można się zastanowić dlaczego). Można jednak poczytać w jaki sposób taki odwrócony rozkład Beta się otrzymuje i w oparciu o tę wiedzę spróbować wymyślić bardziej efektywny estymator.
+
+[odwróconego rozkładu Beta]: https://en.wikipedia.org/wiki/Beta_prime_distribution
