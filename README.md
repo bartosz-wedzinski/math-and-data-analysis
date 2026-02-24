@@ -14,3 +14,17 @@ A comprehensive time series study comparing classical and modern forecasting tec
 
 ### Tools:
 * **R Libraries**: `forecast`, `fpp2`, `tseries`, `ggplot2`, `kableExtra`, `knitr`, `gridExtra`, `dplyr`, `tidyr`, `nortest`.
+
+# Global Temperature Time Series: Detrending vs. Differencing
+
+An in-depth autoregressive (AR) modeling project analyzing global temperature anomalies (1850-2023), focusing on the methodological differences between stochastic and deterministic trend removal.
+
+### Key Highlights:
+* **Stationarity Transformations**: Contrasted **first-order differencing** (stochastic approach) against **5th-degree polynomial detrending** (deterministic approach) to stabilize the mean.
+* **AR(p) Modeling**: Automated order selection utilizing **AIC** and **FPE** criteria, followed by parameter estimation comparing **Yule-Walker** equations and **Maximum Likelihood Estimation (MLE)**.
+* **Rigorous Diagnostics**: Validated model residuals using Ljung-Box tests, ACF visualizations (white noise evaluation), Shapiro-Wilk, and Jarque-Bera tests.
+* **Forecasting & Critical Analysis**: Generated 10-year inverse-transformed forecasts. Included a critical evaluation of prediction intervals, highlighting the "funnel of uncertainty" in differenced models versus the overconfident "tunnel" effect and overfitting risks associated with high-degree polynomial detrending.
+
+### Technologies:
+* **R Libraries**: `astsa`, `forecast`, `tseries`, `ggplot2`, `gridExtra`, `knitr`, `kableExtra`, `dplyr`, `tidyr`, `nortest`.
+* **Techniques**: ARIMA/AR modeling, Statistical Hypothesis Testing, Predictive Uncertainty Analysis.
