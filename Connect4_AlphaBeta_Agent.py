@@ -264,10 +264,5 @@ def graj():
 if __name__ == "__main__":
     graj()
     
-    
-# Zaprezentowana powyżej wersja "turbo" jest mocno zoptymalizowanym wariantem pierwotnego kodu. Zmieniono kopiowanie tabeli przy każdym analizowanym wariancie na modyfikację w miejscu z cofaniem oraz sprawdzanie, czy jest już wygrana z całej planszy na jedynie okolicę ostatniego włożonego żetonu. Pozwoliło to na uzyskanie podobnego czasu odpowiedzi dla głębokości = 7, co dla pierwotnego kodu przy głębokości = 5. Dodatkowo zmieniono wartości premii na lepiej działające, wybieranie kolumny z losowo wybranej na priorytetowo kolumny centralne oraz uwzględniono preferencje, co do szybszej wygranej i późniejszej przegranej (dotychczasowo wygrana AI za 5 ruchów była tyle samo punktowana, co za 1, więc mogło wybrać pierwszą opcję, co jest nieintuicyjne i bezsensowne).
 
-# W celu zmiany trudności rozgrywki można zmienić wartość głębokości. Obecnie zastosowana wartość równa 7 jest więcej, niż wystarczająca do pokonania zdecydowanej większości graczy, a jednocześnie najwyższą możliwą, by uzyskiwać relatywnie szybkie odpowiedzi przez całość partii.
-    
 
-    
