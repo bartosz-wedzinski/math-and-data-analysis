@@ -40,4 +40,4 @@ This project focuses on the algorithmic implementation and mathematical derivati
 * **Performance Benchmarking**: Comparative execution time analysis between the Box-Muller transform and the Acceptance-Rejection method.
 
 ### Tools:
-* **R Libraries**: `knitr`, `xtabke`, `ggplot2`, `gridExtra`, `latex2exp` for mathematical data visualization.
+* **R Libraries**: `knitr`, `xtable`, `ggplot2`, `gridExtra`, `latex2exp` for mathematical data visualization.
