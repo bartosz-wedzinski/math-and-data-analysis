@@ -1,7 +1,7 @@
 ---
-title: "Metody Monte Carlo"
-subtitle: "Raport nr 2"
+title: "Advanced Monte Carlo Integrations"
 author: "Bartosz Wędziński"
+date: "22-01-2026"
 output:
   pdf_document:
     latex_engine: xelatex
@@ -22,7 +22,7 @@ header-includes:
   - \pagestyle{fancy}
   - \fancyhf{}
   - \rhead{\thepage}
-  - \lhead{RAPORT NR 2}
+  - \lhead{Advanced Monte Carlo Integrations}
   - \usepackage{setspace}
   - \usepackage{sectsty}
   - \allsectionsfont{\bfseries\sffamily\large}
@@ -47,13 +47,11 @@ knitr::opts_chunk$set(fig.align='center', fig.pos='H', warning=FALSE, message=FA
 
 \newpage
 
-# Zadanie 1: Generowanie prób z rozkładów wielowymiarowych (5 pkt)
+# Generowanie prób z rozkładów wielowymiarowych
 
-## 1. Zaproponuj i zaimplementuj w R algorytm generowania prób z 4-wymiarowego rozkładu normalnego o parametrach:
+## Algorytm generowania prób z 4-wymiarowego rozkładu normalnego o parametrach:
 
 $$ \boldsymbol{\mu}=\begin{bmatrix} 1 \\ 3 \\ -1 \\ -3 \end{bmatrix},\ \ \ \Sigma=\begin{bmatrix} 1 & 2 & 1 & 2 \\ 2 & 8 & 4 & 8 \\ 1 & 4 & 3 & 6 \\ 2 & 8 & 6 & 16\end{bmatrix}.$$
-
-**Rozwiązanie:**
 
 ### Podstawy teoretyczne i algorytm
 
@@ -109,12 +107,12 @@ Analiza otrzymanych wyników symulacyjnych potwierdza poprawność zaimplementow
 
 \newpage
 
-## 2. Rozważmy następujący sympleks w $\mathbb R^2$:
+## Rozważmy następujący sympleks w $\mathbb R^2$:
 
 $$ S=\{(x,y)\in\mathbb [0,\infty)^2:\ x+y\le 1\}$$
-Zaproponuj i zaimplementuj w R algorytm generowania prób z rozkładu o gęstości
+Implementacja algorytmi generowania prób z rozkładu o gęstości:
 $$f(x,y)=60xy^2\mathbf{1}_{S}(x,y).$$
-korzystając z rozkładów warunkowych. Narysuj wykres łączny (jointplot) wygenerowanej próby $((x_j,y_j))_{j=1}^n$, wraz z histogramami rozkładów brzegowych.
+korzystając z rozkładów warunkowych + jointplot wygenerowanej próby $((x_j,y_j))_{j=1}^n$, wraz z histogramami rozkładów brzegowych.
 
 
 ### Opis teoretyczny i wyprowadzenie algorytmu
@@ -207,11 +205,9 @@ Obserwowane histogramy brzegowe są zgodne z teoretycznymi przewidywaniami. Rozk
 
 \newpage
 
-## 3. Zaproponuj i zaimplementuj w R algorytm generowania prób z rozkładu dwuwymiarowego o gęstości
+## Algorytm generowania prób z rozkładu dwuwymiarowego o gęstości:
 $$f(x,y)=\frac 1C (1+x^2+2y^2)^{-4/3},$$
-gdzie $C=\int_{\mathbb R^2}(1+x^2+2y^2)^{-4/3}\mathrm dx\mathrm d y$ korzystając z metody ilorazów jednostajnych.Narysuj wykres łączny (jointplot) wygenerowanej próby $((x_j,y_j))_{j=1}^n$, wraz z histogramami rozkładów brzegowych.
-
-**Wskazówka:** Należy zastosować ogólniejszą metodę ilorazów jednostajnych dla pewnego $r>1$ (trzeba dobrać $r$, tak by funkcje $h_j(x,y)$ były ograniczone)
+gdzie $C=\int_{\mathbb R^2}(1+x^2+2y^2)^{-4/3}\mathrm dx\mathrm d y$ korzystając z metody ilorazów jednostajnych + jointplot wygenerowanej próby $((x_j,y_j))_{j=1}^n$, wraz z histogramami rozkładów brzegowych.
 
 ### Analiza teoretyczna i wyznaczenie obszaru akceptacji
 
@@ -304,17 +300,15 @@ Zastosowanie metody ilorazów jednostajnych dla parametru $r=3$ pozwoliło na po
 
 \newpage
 
-# Zadanie 2: Estymacja całek metodami Monte Carlo (3 pkt)
+# Estymacja całek metodami Monte Carlo (3 pkt)
 
-## 1. Oblicz w przybliżeniu objętość elipsoidy
+## Objętość elipsoidy
 $$
 E=\bigl\{(x,y,z)\in\mathbb R^2: \frac{x^2}{a^2}+\frac{y^2}{b^2}+\frac{z^2}{c^2}\le 1\bigr\}
 $$
 dla wybranych RÓŻNYCH parametrów $a,b,c>0$.
 
-**Rozwiązanie:**
-
-### 1. Wstęp teoretyczny i konstrukcja estymatora
+### Wstęp teoretyczny i konstrukcja estymatora
 
 Rozważamy problem estymacji objętości bryły $E \subset \mathbb{R}^3$ zdefiniowanej nierównością:
 $$\frac{x^2}{a^2}+\frac{y^2}{b^2}+\frac{z^2}{c^2}\le 1.$$
@@ -327,7 +321,7 @@ Zgodnie z Centralnym Twierdzeniem Granicznym, dla dużej liczby prób rozkład e
 $$\left[ \hat{V}_n - z_{1-\alpha/2} \frac{\hat{\sigma}_n}{\sqrt{n}}, \quad \hat{V}_n + z_{1-\alpha/2} \frac{\hat{\sigma}_n}{\sqrt{n}} \right],$$
 gdzie $\hat{\sigma}_n$ jest estymatorem odchylenia standardowego zmiennej $W$, a $z_{1-\alpha/2}$ odpowiednim kwantylem rozkładu $N(0,1)$. W poniższej symulacji wyznaczymy przebieg wartości estymatora oraz jego przedziałów ufności w zależności od liczebności próby $n$.
 
-### 2. Implementacja w środowisku R
+### Implementacja w środowisku R
 
 Symulacja została przeprowadzona dla trzech różnych zestawów parametrów $(a,b,c)$. Dla zachowania czytelności wykresów zbieżności przyjęto $N=20\,000$ punktów pomiarowych, co pozwala na wyraźne zaobserwowanie procesu stabilizacji estymatora.
 
@@ -409,9 +403,7 @@ Przeprowadzona analiza symulacyjna potwierdza skuteczność metody Monte Carlo w
 
 \newpage
 
-## 2. Żuk Mandelbrota jest podzbiorem płaszczyzny zespolonej, do którego należą punkty $p\in\mathbb{C}$, dla których ciąg
-$$z_n=\begin{cases} z_0=0\\ z_{n}=z_{n-1}^2+p,\ n>1 \end{cases}$$
-nie zbiega do nieskończoności. Oblicz przybliżoną powierzchnię zbioru Mandelbrota (rozumianego jako podzbiór płaszczyzny $\mathbb R^2$).
+## Obliczanie przybliżonej powierzchnii zbioru Mandelbrota (rozumianego jako podzbiór płaszczyzny $\mathbb R^2$).
 
 ### Opis teoretyczny i konstrukcja estymatora
 
@@ -505,10 +497,11 @@ Uzyskane wyniki wskazują na poprawność zastosowanej metody estymacji. Wykres 
 
 \newpage
 
-## 3. Oblicz przybliżoną wartość całki
+## Obliczanie przybliżonej wartość całki:
+                                                                 
 $$\int_0^{2\pi}x\sin{[(1/\cos{(\ln{(x+1)})})^2]}\mathrm{d}x.$$
 
-Dla każdego z zaimplementowanych estymatorów, stwórz wykres zmienności wartości estymatora od liczności próby i zaznacz na nim asymptotyczne przedziały ufności.
++ wykres zmienności wartości estymatora od liczności próby z asymptotycznymi przedziałami ufności.
 
 ### Podstawy teoretyczne i konstrukcja estymatora
 
@@ -605,7 +598,7 @@ Zaimplementowany algorytm Monte Carlo wykazuje poprawną zbieżność stochastyc
 
 \newpage
 
-# Zadanie 3: Obciążenie i metoda delta (2 pkt)
+# Obciążenie i metoda delta
 
 Załóżmy, że mamy wygenerowaną próbę prostą $(x_j)_{j=1}^n$ ze zmiennej $X$ o rozkładzie normalnym $\mathcal N(0,\sigma^2)$, gdzie $\sigma^2>0$ jest nieznane. Chcemy estymować wartości funkcji tworzącej momenty (czyli transformaty Laplace'a) $$M_X(t)=\mathbb E e^{tX}.$$
 Rozważmy dwie metody:
@@ -614,9 +607,8 @@ Rozważmy dwie metody:
 
 ## 2. Estymacja wariancji $\sigma^2$ za pomocą wariancji próbkowej $\sigma^2_n$ z $(x_j)_{j=1}^n$ i następnie obliczenie estymatora $\widehat{M_X}(t)=e^{\tfrac{t^2}2\sigma^2_n}$.
 
-Oceń jakość obu metod estymacji, wyznaczając asymptotyczne przedziały ufności obu estymatorów dla rosnącej liczności próby $n$ z rozkładu $\mathcal N(0,\sigma^2)$ i wybranego $\sigma^2\neq 1$.
+Oceniam jakość obu metod estymacji, wyznaczając asymptotyczne przedziały ufności obu estymatorów dla rosnącej liczności próby $n$ z rozkładu $\mathcal N(0,\sigma^2)$ i wybranego $\sigma^2\neq 1$.
 
-**Rozwiązanie:**
 
 ### Analiza teoretyczna i metoda podziałów
 
@@ -720,15 +712,11 @@ Analiza porównawcza obu metod pozwala na wyciągnięcie istotnych wniosków dot
 
 \newpage
 
-# Zadanie 4: Zmniejszanie wariancji w estymacji całek metodami Monte-Carlo (4 pkt)
+# Zmniejszanie wariancji w estymacji całek metodami Monte-Carlo
 
-## 1. Zaproponuj przynajmniej trzy różne estymatory Monte-Carlo estymujące wartość całki
+## Trzy różne estymatory Monte-Carlo estymujące wartość całki:
 
 $$ I_1=\int_{\tfrac 12}^1\frac{e^{1/x}x^{1/3}}{(1+x)^{7/3}}\mathrm d x.$$
-Skorzystaj z różnych metod zaprezentowanych na wykładzie. Porównaj zaproponowane estymatory, analizując ich wariancje bądź asymptotyczne przedziały ufności. Określ, który z estymatorów jest najlepszy.
-
-**Rozwiązanie:**
-
 
 ### Konstrukcja estymatorów i analiza teoretyczna
 
@@ -805,7 +793,7 @@ ggplot(results, aes(x = Metoda, y = CI_Szerokosc, fill = Metoda)) +
 
 \newpage
 
-## 2. Zaproponuj estymator Monte-Carlo całki
+## Estymator Monte-Carlo całki:
 
 $$ I_2=\int_{\tfrac 12}^{\infty}\frac{e^{1/x}x^{1/3}}{(1+x)^{7/3}}\mathrm d x.$$
 
@@ -819,12 +807,12 @@ Wtedy $dx = -1/u^2 du$. Granice całkowania zmieniają się następująco: $\tfr
 Po przekształceniach funkcja podcałkowa upraszcza się do postaci:
 $$ \int_0^2 \frac{e^u}{(u+1)^{7/3}} \mathrm d u.$$
 
-Aby uzyskać bardzo dokładny wynik i znacząco zredukować wariancję (bardziej niż w metodach z punktu 4.1), zdecydowałem się połączyć dwie techniki:
+Aby uzyskać bardzo dokładny wynik i znacząco zredukować wariancję (bardziej niż w poprzednich metodach), zdecydowałem się połączyć dwie techniki:
 
 1.  **Warstwowanie (Stratified Sampling):** Dzielę przedział $[0, 2]$ na $K$ małych podprzedziałów (warstw).
 2.  **Zmienne kontrolne (Control Variates) wewnątrz warstw:** Zauważyłem, że na bardzo małym przedziale każdą gładką funkcję można dobrze przybliżyć wielomianem (korzystając z rozwinięcia Taylora). Zamiast liczyć zwykłą średnią w warstwie, dopasowuję w niej wielomian 3. stopnia (używając regresji liniowej). Całkę z wielomianu znamy dokładnie, więc błąd Monte Carlo pochodzi tylko od "reszty" (różnicy między funkcją a wielomianem), która jest bliska zeru.
 
-Poniższy kod implementuje to podejście: dzieli przedział na $100\,000$ warstw i w każdej stosuje lokalną regresję jako metodę zmiennych kontrolnych.
+Poniższy kod implementuje to podejście: dzieli przedział na warstwy i w każdej stosuje lokalną regresję jako metodę zmiennych kontrolnych.
 
 ### Implementacja w R
 
@@ -836,8 +824,8 @@ set.seed(2137)
 f_trans <- function(u) exp(u) / (u + 1)^(7/3)
 
 # Parametry symulacji
-k_strata <- 100000      # Liczba warstw
-n_per_strata <- 1000    # Próbki na warstwę (dla stabilnej regresji)
+k_strata <- 10000      # Liczba warstw
+n_per_strata <- 500    # Próbki na warstwę (dla stabilnej regresji)
 total_width <- 2        # Długość przedziału [0, 2]
 w <- total_width / k_strata
 
@@ -892,12 +880,3 @@ Zastosowana metoda hybrydowa (Stratyfikacja + Lokalne Zmienne Kontrolne) pozwoli
 
 Otrzymany błąd jest mniejszy niż precyzja maszynowa, co oznacza, że wariancja Monte Carlo została w praktyce całkowicie wyeliminowana przez dopasowanie wielomianowe.
 
-
-\newpage
-
-
-**Uwaga 1:** Ogłaszam konkurs na najlepszy estymator całki $I_2$. Osoba, która zaproponuje najefektywniejszy (o najwęższym asymptotycznym przedziale ufności - czyli jednocześnie najmniejszej wariancji), będzie darzona nieskończoną **estymą** i dodatkowo otrzyma 5 punktów z aktywności (czyli maksymalną możliwą liczbę punktów).
-
-**Uwaga 2:** Chociaż w funkcji podcałkowej występuje gęstość **[odwróconego rozkładu Beta]** z parametrami $\alpha=\tfrac 43$ i $\beta=1$, to estymator Monte-Carlo oparty o próbę generowaną z tego rozkładu jest wyjątkowo nieefektywny (można się zastanowić dlaczego). Można jednak poczytać w jaki sposób taki odwrócony rozkład Beta się otrzymuje i w oparciu o tę wiedzę spróbować wymyślić bardziej efektywny estymator.
-
-[odwróconego rozkładu Beta]: https://en.wikipedia.org/wiki/Beta_prime_distribution
