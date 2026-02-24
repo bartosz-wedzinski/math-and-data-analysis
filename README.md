@@ -1,6 +1,4 @@
-# math-and-data-analysis
-
-# Eurozone Retail Trade Index - Forecasting Analysis
+# Time Series Forecasting Analysis
 
 A comprehensive time series study comparing classical and modern forecasting techniques using the `euretail` dataset.
 
@@ -15,4 +13,4 @@ A comprehensive time series study comparing classical and modern forecasting tec
 * **Critical Thinking**: Included analysis of structural breaks (2008 crisis) and their impact on automated parameter selection.
 
 ### Tools:
-* **R Libraries**: `forecast`, `fpp2`, `tseries`, `ggplot2`, `kableExtra`.
+* **R Libraries**: `forecast`, `fpp2`, `tseries`, `ggplot2`, `kableExtra`, `knitr`, `gridExtra`, `dplyr`, `tidyr`, `nortest`.
