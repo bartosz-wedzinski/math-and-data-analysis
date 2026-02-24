@@ -1,0 +1,1736 @@
+---
+title: "Sprawozdanie 2 - Zadanie 3"
+author: "Bartosz Wędziński"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    number_sections: true
+    fig_caption: true
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+fontsize: 12pt
+geometry: margin=1in
+header-includes:
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhf{}
+  - \rhead{Bartosz Wędziński}
+  - \lhead{ZADANIE 3}
+  - \cfoot{\thepage}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = 'center',
+  fig.width = 10,
+  fig.height = 6,
+  cache = FALSE
+)
+
+# Ustawienie seed dla reprodukowalności
+set.seed(2137)
+
+# Licznik dla rysunków i tabel
+fig_counter <- 1
+tab_counter <- 1
+```
+
+```{r libraries, include=FALSE}
+library(astsa)        # Dane gtemp_both
+library(forecast)     # Funkcje do analizy szeregów czasowych
+library(tseries)      # Testy stacjonarności
+library(ggplot2)      # Wizualizacje
+library(gridExtra)    # Układanie wykresów
+library(knitr)        # Formatowanie tabel
+library(kableExtra)   # Zaawansowane formatowanie tabel
+library(dplyr)        # Manipulacja danymi
+library(tidyr)        # Przekształcanie danych
+library(nortest)      # Testy normalności
+```
+
+```{r helper_functions, include=FALSE}
+
+# Funkcja do automatycznego numerowania rysunków
+fig_caption <- function(text) {
+  caption <- paste0("Rysunek ", fig_counter, ": ", text)
+  fig_counter <<- fig_counter + 1
+  return(caption)
+}
+
+# Funkcja do automatycznego numerowania tabel
+tab_caption <- function(text) {
+  caption <- paste0("Tabela ", tab_counter, ": ", text)
+  tab_counter <<- tab_counter + 1
+  return(caption)
+}
+
+# Funkcja do testowania stacjonarności (ADF + KPSS)
+test_stationarity <- function(series, series_name = "Szereg") {
+  # Test ADF (H0: szereg niestacjonarny)
+  adf_test <- adf.test(series, alternative = "stationary")
+  # Test KPSS (H0: szereg stacjonarny)
+  kpss_test <- kpss.test(series, null = "Level")
+  
+  # Wyniki
+  results <- data.frame(
+    Test = c("ADF", "KPSS"),
+    Statystyka = c(adf_test$statistic, kpss_test$statistic),
+    `p-value` = c(adf_test$p.value, kpss_test$p.value),
+    `Wniosek ($\\alpha$=0.05)` = c(
+      ifelse(adf_test$p.value < 0.05, "Odrzucamy H0 (stacjonarny)", "Nie odrzucamy H0 (niestacjonarny)"),
+      ifelse(kpss_test$p.value < 0.05, "Odrzucamy H0 (niestacjonarny)", "Nie odrzucamy H0 (stacjonarny)")
+    ),
+    check.names = FALSE
+  )
+  
+  return(results)
+}
+
+# Funkcja do obliczania kryteriów informacyjnych dla różnych rzędów AR
+compute_ar_criteria <- function(series, max_p = 20) {
+  aic_vals <- numeric(max_p + 1)
+  fpe_vals <- numeric(max_p + 1)
+  
+  for (p in 0:max_p) {
+    if (p == 0) {
+      # AR(0) to biały szum
+      n <- length(series)
+      sigma2 <- var(series)
+      aic_vals[p + 1] <- n * log(sigma2) + 2 * 1  # 1 parametr (wariancja)
+      fpe_vals[p + 1] <- sigma2 * (n + 1) / (n - 1)
+    } else {
+      fit <- ar(series, aic = FALSE, order.max = p, method = "mle")
+      aic_vals[p + 1] <- fit$aic
+      n <- fit$n.used
+      sigma2 <- fit$var.pred
+      fpe_vals[p + 1] <- sigma2 * (n + p) / (n - p)
+    }
+  }
+  
+  return(data.frame(p = 0:max_p, AIC = aic_vals, FPE = fpe_vals))
+}
+
+# Funkcja do wizualizacji kryteriów informacyjnych
+plot_criteria <- function(criteria_df, title = "") {
+  p1 <- ggplot(criteria_df, aes(x = p, y = AIC)) +
+    geom_line(color = "steelblue", size = 1) +
+    geom_point(color = "steelblue", size = 2) +
+    geom_point(data = criteria_df[which.min(criteria_df$AIC), ], 
+               aes(x = p, y = AIC), color = "red", size = 4) +
+    labs(title = paste0("Kryterium AIC ", title),
+         x = "Rząd p", y = "AIC") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+  
+  p2 <- ggplot(criteria_df, aes(x = p, y = FPE)) +
+    geom_line(color = "darkgreen", size = 1) +
+    geom_point(color = "darkgreen", size = 2) +
+    geom_point(data = criteria_df[which.min(criteria_df$FPE), ], 
+               aes(x = p, y = FPE), color = "red", size = 4) +
+    labs(title = paste0("Kryterium FPE ", title),
+         x = "Rząd p", y = "FPE") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+  
+  grid.arrange(p1, p2, ncol = 2)
+}
+
+# Funkcja do testów białoszumowości
+whitenoise_tests <- function(residuals, lag_max = 20, alpha = 0.05) {
+  n <- length(residuals)
+  
+  # Test Ljung-Box dla różnych opóźnień
+  lb_results <- data.frame(
+    Lag = integer(),
+    Statystyka = numeric(),
+    `p-value` = numeric(),
+    Decyzja = character(),
+    check.names = FALSE
+  )
+  
+  for (h in c(5, 10, 15, 20)) {
+    if (h < n) {
+      lb_test <- Box.test(residuals, lag = h, type = "Ljung-Box")
+      lb_results <- rbind(lb_results, data.frame(
+        Lag = h,
+        Statystyka = round(lb_test$statistic, 4),
+        `p-value` = round(lb_test$p.value, 4),
+        Decyzja = ifelse(lb_test$p.value < alpha, 
+                        "Odrzucamy H0 (nie biały szum)", 
+                        "Nie odrzucamy H0 (biały szum)"),
+        check.names = FALSE
+      ))
+    }
+  }
+  
+  # Test graficzny 
+  acf_vals <- acf(residuals, lag.max = lag_max, plot = FALSE)$acf[-1]  # bez lag 0
+  z_critical <- qnorm(1 - alpha/2) / sqrt(n)
+  
+  # Warunek 1: częstość przekroczeń powinna być bliska alpha
+  exceed_count <- sum(abs(acf_vals) > z_critical)
+  exceed_freq <- exceed_count / length(acf_vals)
+  
+  # Warunek 2: reguła 3-sigma 
+  z_3sigma <- 3 / sqrt(n)
+  extreme_exceed <- any(abs(acf_vals) > z_3sigma)
+  
+  graphic_decision <- ifelse(exceed_freq < 0.15 & !extreme_exceed, 
+                             "Biały szum", 
+                             "Nie biały szum")
+  
+  graphic_test <- data.frame(
+    Test = "Test graficzny (ACF)",
+    `Częstość przekroczeń` = paste0(round(exceed_freq * 100, 2), "\\%"),
+    `Ekstrema (3$\\sigma$)` = ifelse(extreme_exceed, "Tak", "Nie"),
+    Decyzja = graphic_decision,
+    check.names = FALSE
+  )
+  
+  return(list(ljung_box = lb_results, graphic = graphic_test))
+}
+
+# Funkcja do wykresu diagnostycznego reszt
+diagnostic_plots <- function(residuals, model_name = "") {
+  par(mfrow = c(2, 2))
+  
+  # 1. Szereg reszt w czasie
+  plot(residuals, type = "l", main = paste("Reszty w czasie -", model_name),
+       xlab = "Czas", ylab = "Reszty", col = "steelblue")
+  abline(h = 0, col = "red", lty = 2)
+  
+  # 2. Histogram z krzywą normalną
+  hist(residuals, breaks = 30, probability = TRUE, 
+       main = paste("Histogram reszt -", model_name),
+       xlab = "Reszty", col = "lightblue", border = "white")
+  curve(dnorm(x, mean = mean(residuals), sd = sd(residuals)), 
+        add = TRUE, col = "red", lwd = 2)
+  
+  # 3. Q-Q plot
+  qqnorm(residuals, main = paste("Q-Q Plot -", model_name), pch = 20, col = "steelblue")
+  qqline(residuals, col = "red", lwd = 2)
+  
+  # 4. ACF reszt
+  acf(residuals, main = paste("ACF reszt -", model_name), lag.max = 30)
+  
+  par(mfrow = c(1, 1))
+}
+
+# Funkcja do prognozowania z AR
+forecast_ar <- function(fit, h = 10, original_series = NULL, transformed_type = NULL, 
+                        trend_fit = NULL, diff_order = NULL) {
+  # Prognozy z modelu AR
+  pred <- predict(fit, n.ahead = h)
+  forecasts <- pred$pred
+  se <- pred$se  
+  
+  # Przedziały predykcji (95\\%) - wstępne
+  lower <- forecasts - 1.96 * se
+  upper <- forecasts + 1.96 * se
+  
+  # Odwrócenie transformacji
+  if (!is.null(transformed_type)) {
+    if (transformed_type == "diff" & !is.null(diff_order)) {
+      # Integracja różnicowania (tutaj bez zmian)
+      n_orig <- length(original_series)
+      last_value <- original_series[n_orig]
+      
+      forecasts_orig <- numeric(h)
+      lower_orig <- numeric(h)
+      upper_orig <- numeric(h)
+      
+      forecasts_orig[1] <- last_value + forecasts[1]
+      
+      lower_orig[1] <- last_value + lower[1]
+      upper_orig[1] <- last_value + upper[1]
+      
+      for (i in 2:h) {
+        forecasts_orig[i] <- forecasts_orig[i-1] + forecasts[i]
+        lower_orig[i] <- lower_orig[i-1] + lower[i]
+        upper_orig[i] <- upper_orig[i-1] + upper[i]
+      }
+      
+      forecasts <- forecasts_orig
+      lower <- lower_orig
+      upper <- upper_orig
+      
+    } else if (transformed_type == "detrend" & !is.null(trend_fit)) {
+      n_orig <- length(original_series)
+      future_time <- (n_orig + 1):(n_orig + h)
+      
+      trend_pred <- predict(trend_fit, newdata = data.frame(time = future_time), se.fit = TRUE)
+      trend_values <- trend_pred$fit
+      trend_se <- trend_pred$se.fit
+
+      total_se <- sqrt(se^2 + trend_se^2)
+      
+      forecasts <- forecasts + trend_values
+      lower <- forecasts - 1.96 * total_se
+      upper <- forecasts + 1.96 * total_se
+    }
+  }
+  
+  return(list(forecasts = forecasts, lower = lower, upper = upper, se = se))
+}
+```
+
+---
+
+\newpage
+
+# Wprowadzenie
+
+## Cel analizy
+
+Celem niniejszego sprawozdania jest przeprowadzenie kompleksowej analizy szeregu czasowego `gtemp_both` reprezentującego odchylenia średniej rocznej temperatury globalnej (mierzonej na powierzchni lądów i oceanów) w latach 1850-2023 względem średniej temperatury dla okresu referencyjnego 1991-2020. Analiza koncentruje się na:
+
+1. Identyfikacji i dopasowaniu optymalnych modeli autoregresyjnych AR(p) do danych.
+2. Porównaniu dwóch alternatywnych podejść do osiągnięcia stacjonarności szeregu: różnicowania oraz eliminacji trendu wielomianowego.
+3. Weryfikacji jakości dopasowanych modeli poprzez szczegółową diagnostykę reszt.
+4. Konstrukcji prognoz temperatury globalnej na kolejne okresy z wykorzystaniem dopasowanych modeli.
+
+## Opis danych
+
+Dane `gtemp_both` pochodzą z pakietu R `astsa` i zawierają 174 obserwacje roczne z lat 1850-2023. Szereg ten stanowi kluczowy wskaźnik zmian klimatycznych, pokazując długoterminowe trendy w globalnym ociepleniu. Wartości dodatnie wskazują na temperatury wyższe od średniej referencyjnej, podczas gdy wartości ujemne oznaczają temperatury niższe.
+
+## Przegląd metod
+
+W analizie wykorzystano następujące metody statystyczne:
+
+- **Testy stacjonarności**: Rozszerzony Test Dickey'a-Fullera (ADF) oraz test KPSS do oceny stacjonarności szeregu.
+- **Transformacje stabilizujące**: Różnicowanie rzędu d oraz eliminacja trendu wielomianowego w celu uzyskania stacjonarności.
+- **Identyfikacja modelu**: Funkcja częściowej autokorelacji (PACF) oraz kryteria informacyjne AIC i FPE do wyboru optymalnego rzędu p.
+- **Estymacja parametrów**: Metoda Yule'a-Walkera (estymacja wstępna) oraz metoda największej wiarogodności (MLE).
+- **Diagnostyka**: Testy białoszumowości (Ljung-Box, test graficzny), testy normalności reszt (Shapiro-Wilk, Jarque-Bera).
+- **Prognozowanie**: Konstrukcja prognoz punktowych i przedziałowych z uwzględnieniem odwrócenia transformacji wstępnych.
+
+---
+
+\newpage
+
+# Analiza wstępna i eksploracja danych
+
+## Charakterystyka szeregu
+
+```{r data_loading}
+# Wczytanie danych
+data(gtemp_both)
+temp_series <- gtemp_both
+
+# Podstawowe informacje
+n <- length(temp_series)
+years <- time(temp_series)
+```
+
+Szereg `gtemp_both` zawiera `r n` obserwacji z lat `r min(years)` do `r max(years)`.
+
+```{r desc_stats}
+# Statystyki opisowe
+stats_desc <- data.frame(
+  Statystyka = c("Minimum", "Q1", "Mediana", "Średnia", "Q3", "Maksimum", 
+                 "Odchylenie std.", "Wariancja"),
+  Wartość = c(
+    min(temp_series),
+    quantile(temp_series, 0.25),
+    median(temp_series),
+    mean(temp_series),
+    quantile(temp_series, 0.75),
+    max(temp_series),
+    sd(temp_series),
+    var(temp_series)
+  )
+)
+
+kable(stats_desc, 
+      digits = 4,
+      caption = tab_caption("Statystyki opisowe szeregu gtemp both"),
+      align = c('l', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+```{r fig_original_series, fig.cap=fig_caption("Szereg czasowy gtemp both - odchylenia średniej temperatury globalnej (1850-2023)")}
+# Wizualizacja szeregu oryginalnego
+ggplot(data.frame(Year = as.numeric(years), Temperature = as.numeric(temp_series)), 
+       aes(x = Year, y = Temperature)) +
+  geom_line(color = "steelblue", size = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.5) +
+  geom_smooth(method = "loess", se = TRUE, color = "darkred", alpha = 0.3) +
+  labs(title = "Odchylenia średniej rocznej temperatury globalnej",
+       subtitle = "Względem okresu referencyjnego 1991-2020",
+       x = "Rok", 
+       y = "Odchylenie temperatury (°C)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+**Interpretacja**: Szereg wykazuje wyraźny trend wzrostowy, szczególnie intensywny od lat 70. XX wieku. Obserwujemy stopniowe ocieplanie się klimatu, z przyspieszeniem w ostatnich dekadach. Wartości oscylują wokół trendu, sugerując możliwość modelowania autoregresyjnego po eliminacji trendu lub zastosowaniu różnicowania.
+
+## Badanie stacjonarności
+
+Przed dopasowaniem modeli autoregresyjnych należy zbadać stacjonarność szeregu. Stosujemy dwa komplementarne testy:
+
+1. **Test ADF (Augmented Dickey-Fuller)**: H₀: szereg zawiera pierwiastek jednostkowy (niestacjonarny).
+2. **Test KPSS (Kwiatkowski-Phillips-Schmidt-Shin)**: H₀: szereg jest stacjonarny wokół stałej lub trendu.
+
+```{r stationarity_original}
+# Testy stacjonarności dla szeregu oryginalnego
+stationarity_orig <- test_stationarity(temp_series, "Szereg oryginalny")
+
+kable(stationarity_orig,
+      caption = tab_caption("Testy stacjonarności dla szeregu oryginalnego gtemp both"),
+      align = c('l', 'r', 'r', 'l')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja wyników**:
+
+- **Test ADF**: `r if(stationarity_orig[1, "p-value"] < 0.05) "Odrzucamy H₀ (p < 0.05), co sugeruje stacjonarność. Jednakże należy pamiętać, że test ADF weryfikuje brak pierwiastka jednostkowego, a alternatywa może oznaczać stacjonarność względem trendu deterministycznego, nie pełną stacjonarność wokół stałej." else "Nie odrzucamy H₀ (p ≥ 0.05), co wskazuje na obecność pierwiastka jednostkowego i niestacjonarność szeregu."`
+
+- **Test KPSS**: `r if(stationarity_orig[2, "p-value"] < 0.05) "Odrzucamy H₀ (p < 0.05), co potwierdza niestacjonarność szeregu." else "Nie odrzucamy H₀ (p ≥ 0.05), co sugeruje stacjonarność."`
+
+**Wniosek ogólny**: Szereg wykazuje silną niestacjonarność. W dalszej części analizy zweryfikujemy, czy ma ona charakter deterministyczny (poprzez eliminację trendu wielomianowego), czy stochastyczny (poprzez różnicowanie)
+
+```{r fig_acf_pacf_original, fig.height=8, fig.cap=fig_caption("ACF i PACF dla szeregu oryginalnego")}
+# ACF i PACF dla szeregu oryginalnego
+par(mfrow = c(2, 1))
+acf(temp_series, lag.max = 40, main = "ACF - szereg oryginalny")
+pacf(temp_series, lag.max = 40, main = "PACF - szereg oryginalny")
+par(mfrow = c(1, 1))
+```
+
+**Interpretacja ACF/PACF**: ACF wykazuje powolne zanikanie, charakterystyczne dla szeregów z trendem lub pierwiastkiem jednostkowym. PACF pokazuje istotne wartości dla pierwszych opóźnień, co potwierdza potrzebę transformacji przed modelowaniem.
+
+---
+
+\newpage
+
+# Transformacje stabilizujące
+
+Aby uzyskać stacjonarność szeregu, rozważamy dwa alternatywne podejścia:
+
+1. **Podejście I**: Różnicowanie rzędu d
+2. **Podejście II**: Eliminacja trendu wielomianowego
+
+## Podejście I: Różnicowanie
+
+Różnicowanie jest klasyczną metodą eliminacji trendu w szeregach czasowych. Stosujemy różnicowanie pierwszego rzędu:
+
+$$\nabla X_t = X_t - X_{t-1}$$
+
+```{r differencing}
+# Różnicowanie pierwszego rzędu
+diff_series <- diff(temp_series, differences = 1)
+n_diff <- length(diff_series)
+```
+
+```{r fig_diff_series, fig.cap=fig_caption("Szereg po różnicowaniu pierwszego rzędu")}
+# Wizualizacja szeregu po różnicowaniu
+diff_years <- years[-1]
+ggplot(data.frame(Year = as.numeric(diff_years), Diff = as.numeric(diff_series)), 
+       aes(x = Year, y = Diff)) +
+  geom_line(color = "darkgreen", size = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.5) +
+  labs(title = "Szereg po różnicowaniu pierwszego rzędu",
+       x = "Rok", 
+       y = "Pierwsze różnice") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+**Interpretacja**: Szereg po różnicowaniu oscyluje wokół stałej wartości, bez wyraźnego trendu. Wygląda na stacjonarny.
+
+### Testy stacjonarności po różnicowaniu
+
+```{r stationarity_diff}
+# Testy stacjonarności po różnicowaniu
+stationarity_diff <- test_stationarity(diff_series, "Szereg po różnicowaniu")
+
+kable(stationarity_diff,
+      caption = tab_caption("Testy stacjonarności dla szeregu po różnicowaniu"),
+      align = c('l', 'r', 'r', 'l')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja**:
+
+- **Test ADF**: `r if(stationarity_diff[1, "p-value"] < 0.05) "Odrzucamy H₀ (p < 0.05), co potwierdza stacjonarność szeregu po różnicowaniu." else "Nie odrzucamy H₀, co jest nieoczekiwane dla szeregu po różnicowaniu."`
+
+- **Test KPSS**: `r if(stationarity_diff[2, "p-value"] < 0.05) "Odrzucamy H₀ (p < 0.05), co wskazuje na niestacjonarność. Może to wynikać z wrażliwości testu KPSS na małe odchylenia od stacjonarności." else "Brak podstaw do odrzucenia hipotezy o stacjonarności H₀ (p ≥ 0.05)."`
+
+**Wniosek**: Różnicowanie pierwszego rzędu skutecznie eliminuje trend, dając szereg, który można uznać za stacjonarny w świetle testu ADF.
+
+```{r fig_acf_pacf_diff, fig.height=8, fig.cap=fig_caption("ACF i PACF dla szeregu po różnicowaniu")}
+# ACF i PACF po różnicowaniu
+par(mfrow = c(2, 1))
+acf(diff_series, lag.max = 40, main = "ACF - szereg po różnicowaniu")
+pacf(diff_series, lag.max = 40, main = "PACF - szereg po różnicowaniu")
+par(mfrow = c(1, 1))
+```
+
+**Interpretacja ACF/PACF**: ACF szybko zanika do wartości nieistotnych, co jest charakterystyczne dla szeregów stacjonarnych. PACF pokazuje kilka istotnych opóźnień (szczególnie lag 1), co sugeruje model AR niskiego rzędu.
+
+## Podejście II: Eliminacja trendu wielomianowego
+
+Alternatywnym podejściem jest estymacja i eliminacja trendu deterministycznego poprzez dopasowanie wielomianu odpowiedniego stopnia.
+
+### Wybór stopnia wielomianu
+
+Dopasowujemy wielomiany różnych stopni (od 1 do 5) i porównujemy kryteria AIC oraz wizualnie oceniamy jakość dopasowania.
+
+```{r polynomial_selection}
+# Przygotowanie danych
+time_var <- 1:n
+data_poly <- data.frame(temp = as.numeric(temp_series), time = time_var)
+
+# Dopasowanie wielomianów różnych stopni
+poly_fits <- list()
+aic_poly <- numeric(5)
+
+for (degree in 1:5) {
+  fit <- lm(temp ~ poly(time, degree, raw = TRUE), data = data_poly)
+  poly_fits[[degree]] <- fit
+  aic_poly[degree] <- AIC(fit)
+}
+
+# Tabela AIC
+aic_table <- data.frame(
+  Stopień = 1:5,
+  AIC = aic_poly,
+  `Δ AIC` = aic_poly - min(aic_poly)
+)
+
+kable(aic_table,
+      digits = 2,
+      caption = tab_caption("Porównanie kryterium AIC dla wielomianów różnych stopni"),
+      align = c('c', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja**: `r paste0("Najmniejszą wartość AIC uzyskano dla wielomianu stopnia ", which.min(aic_poly), ", co sugeruje najlepsze dopasowanie przy uwzględnieniu kary za dodatkowe parametry.")` Jednakże, dla celów interpretacyjności i uniknięcia przeuczenia, rozważymy również wielomiany niższych stopni.
+
+```{r fig_polynomial_fits, fig.height=10, fig.cap=fig_caption("Porównanie dopasowania wielomianów różnych stopni")}
+# Wizualizacja dopasowania wielomianów
+plots_poly <- list()
+
+for (degree in 1:5) {
+  fitted_vals <- fitted(poly_fits[[degree]])
+  
+  p <- ggplot(data.frame(Year = years, 
+                        Observed = as.numeric(temp_series),
+                        Fitted = fitted_vals),
+             aes(x = Year)) +
+    geom_line(aes(y = Observed, color = "Obserwowane"), size = 0.8) +
+    geom_line(aes(y = Fitted, color = "Dopasowane"), size = 1) +
+    scale_color_manual(values = c("Obserwowane" = "steelblue", 
+                                   "Dopasowane" = "darkred")) +
+    labs(title = paste("Wielomian stopnia", degree),
+         x = "Rok", y = "Temperatura (°C)", color = "") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+          legend.position = "bottom")
+  
+  plots_poly[[degree]] <- p
+}
+
+do.call(grid.arrange, c(plots_poly, ncol = 2))
+```
+
+**Interpretacja wizualna**: Wielomian stopnia zaledwie 2 (paraboliczny) już dobrze oddaje ogólny trend wzrostowy z przyspieszeniem. Wielomiany wyższych stopni mogą prowadzić do przeuczenia i nierealistycznych ekstrapolacji, zwłaszcza dla zaledwie 174 obserwacji. Należy zachować ostrożność przy prognozowaniu, gdyż wielomiany wysokiego stopnia wykazują tendencję do niestabilności na krańcach szeregu.
+
+### Wybór ostateczny i eliminacja trendu
+
+Dla celów badawczych odstępuję od zasady parsymonii i wybieram **wielomian stopnia 5**, mając jednocześnie świadomość istnienia ryzyka związanego z potencjalnym wyborem zbyt dużego stopnia. 
+
+**Oczekiwany rezultat:** Modelowanie temperatury globalnej wielomianem rzędu 5 doprowadzi do overfittingu, a w rezultacie tego doszłoby do absurdalnych prognoz za 20-30 lat (potencjalna niestabilność modelu zostanie ograniczona przez krótki horyzont prognozy (10 lat)).
+
+```{r detrending}
+# Wybór optymalnego stopnia (na podstawie AIC)
+optimal_degree <- which.min(aic_poly)
+trend_fit <- poly_fits[[optimal_degree]]
+
+# Reszty (szereg po eliminacji trendu)
+detrended_series <- residuals(trend_fit)
+```
+
+```{r fig_detrended, fig.cap=fig_caption(paste0("Szereg oryginalny, trend wielomianowy (stopień ", optimal_degree, ") oraz reszty"))}
+# Wizualizacja: oryginalny szereg, trend, reszty
+df_detrend <- data.frame(
+  Year = years,
+  Original = as.numeric(temp_series),
+  Trend = fitted(trend_fit),
+  Residuals = detrended_series
+)
+
+p1 <- ggplot(df_detrend, aes(x = Year)) +
+  geom_line(aes(y = Original, color = "Oryginalny szereg"), size = 0.8) +
+  geom_line(aes(y = Trend, color = "Trend"), size = 1.2) +
+  scale_color_manual(values = c("Oryginalny szereg" = "steelblue", 
+                                 "Trend" = "darkred")) +
+  labs(title = "Dane oryginalne i dopasowany trend",
+       x = "Rok", y = "Temperatura (°C)", color = "") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position = "bottom")
+
+p2 <- ggplot(df_detrend, aes(x = Year, y = Residuals)) +
+  geom_line(color = "darkgreen", size = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.5) +
+  labs(title = "Reszty (szereg po eliminacji trendu)",
+       x = "Rok", y = "Reszty") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+grid.arrange(p1, p2, ncol = 1)
+```
+
+**Interpretacja**: Reszty oscylują wokół zera bez wyraźnego trendu, co sugeruje skuteczną eliminację trendu wielomianowego.
+
+### Testy stacjonarności reszt
+
+```{r stationarity_detrended}
+# Testy stacjonarności dla reszt
+stationarity_detrend <- test_stationarity(detrended_series, "Reszty po detrendingu")
+
+kable(stationarity_detrend,
+      caption = tab_caption("Testy stacjonarności dla szeregu po eliminacji trendu"),
+      align = c('l', 'r', 'r', 'l')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja**:
+
+- **Test ADF**: `r if(stationarity_detrend[1, "p-value"] < 0.05) "Odrzucamy H₀ (p < 0.05), potwierdzając stacjonarność reszt." else "Nie odrzucamy H₀, co może wskazywać na niewystarczającą eliminację niestacjonarności."`
+
+- **Test KPSS**: `r if(stationarity_detrend[2, "p-value"] < 0.05) "Odrzucamy H₀ (p < 0.05), co sugeruje niestacjonarność. Jednakże, przy małych odchyleniach od stacjonarności, test KPSS może być nadmiernie konserwatywny." else "Brak podstaw do odrzucenia hipotezy o stacjonarności H₀ (p ≥ 0.05)."`
+
+**Wniosek**: Eliminacja trendu wielomianowego skutecznie prowadzi do stacjonarnego szeregu reszt, zgodnie z testem ADF.
+
+```{r fig_acf_pacf_detrended, fig.height=8, fig.cap=fig_caption("ACF i PACF dla szeregu po eliminacji trendu")}
+# ACF i PACF po detrendingu
+par(mfrow = c(2, 1))
+acf(detrended_series, lag.max = 40, main = "ACF - reszty po detrendingu")
+pacf(detrended_series, lag.max = 40, main = "PACF - reszty po detrendingu")
+par(mfrow = c(1, 1))
+```
+
+**Interpretacja ACF/PACF**: ACF szybko maleje, potwierdzając stacjonarność. PACF pokazuje istotne wartości dla pierwszego lagu, sugerując model AR bardzo niskiego rzędu (1).
+
+## Porównanie obu podejść
+
+```{r comparison_transformations}
+# Tabela porównawcza wyników testów stacjonarności
+comparison_df <- data.frame(
+  Metoda = c("Różnicowanie (d=1)", "Różnicowanie (d=1)", 
+             paste0("Eliminacja trendu (stopień = ", optimal_degree, ")"),
+             paste0("Eliminacja trendu (stopień = ", optimal_degree, ")")),
+  Test = c("ADF", "KPSS", "ADF", "KPSS"),
+  Statystyka = c(stationarity_diff$Statystyka, stationarity_detrend$Statystyka),
+  `p-value` = c(stationarity_diff$`p-value`, stationarity_detrend$`p-value`),
+  Wniosek = c(stationarity_diff$`Wniosek ($\\alpha$=0.05)`, 
+              stationarity_detrend$`Wniosek ($\\alpha$=0.05)`),
+  check.names = FALSE
+)
+
+kable(comparison_df,
+      caption = tab_caption("Porównanie wyników testów stacjonarności dla obu metod transformacji"),
+      align = c('l', 'l', 'r', 'r', 'l')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  pack_rows("Różnicowanie", 1, 2) %>%
+  pack_rows(paste0("Eliminacja trendu (stopień ", optimal_degree, ")"), 3, 4)
+```
+
+**Wnioski porównawcze**:
+
+- Różnicowanie wprowadziło silną ujemną autokorelację pierwszego rzędu (ok. -0.4) - to ważny sygnał diagnostyczny, który oznacza, że szereg pierwotny mógł zostać przeróżnicowany oraz, że mógł mieć charakter trend-stacjonarny. Reszty po eliminacji trendu zachowują dodatnią autokorelację (ok. 0.2 dla 1. lagu). Sugeruje to inną strukturę modelu AR(p) dla obu podejść
+- Oba podejścia skutecznie eliminują trend i prowadzą do szeregów, które można uznać za stacjonarne w świetle testu ADF.
+- Test KPSS jest bardziej konserwatywny i może wskazywać na odrzucenie H₀ nawet przy niewielkich odchyleniach od idealnej stacjonarności.
+- **Różnicowanie** jest prostsze obliczeniowo i nie wymaga dodatkowych założeń o kształcie trendu.
+- **Eliminacja trendu wielomianowego** pozwala na bezpośrednią interpretację trendu i może być preferowana, gdy trend ma jasną interpretację fizyczną.
+
+W dalszej części analizy dopasujemy modele AR(p) do obu przetransformowanych szeregów i porównamy ich jakość oraz użyteczność prognostyczną.
+
+---
+
+\newpage
+
+# Identyfikacja rzędu modelu AR(p)
+
+Dla obu podejść (różnicowanie i eliminacja trendu) przeprowadzimy identyfikację optymalnego rzędu p modelu autoregresyjnego AR(p) za pomocą:
+
+1. **Analizy PACF** (metoda graficzna)
+2. **Kryteriów informacyjnych AIC i FPE** (metoda analityczna)
+
+## Metoda graficzna: PACF
+
+Funkcja częściowej autokorelacji (PACF) pozwala zidentyfikować rząd p poprzez obserwację, przy którym opóźnieniu wartości PACF stają się nieistotne statystycznie.
+
+```{r fig_pacf_identification, fig.height=8, fig.cap=fig_caption("PACF dla obu podejść transformacji")}
+par(mfrow = c(2, 1))
+pacf(diff_series, lag.max = 30, main = "PACF - Podejście I (Różnicowanie)")
+pacf(detrended_series, lag.max = 30, main = "PACF - Podejście II (Eliminacja trendu)")
+par(mfrow = c(1, 1))
+```
+
+**Interpretacja**:
+
+- **Podejście I (Różnicowanie)**: PACF pokazuje istotne wartości dla opóźnień 1, 2, 3, 4 oraz 5, co sugeruje model **AR(5)**.
+- **Podejście II (Eliminacja trendu)**: PACF wskazuje na istotną wartośc dla pierwszego opóźnienia, sugerując niższy rząd modelu **AR(1)**.
+
+Wstępnie rozważamy modele AR(p) dla p ∈ {1, 5}.
+
+## Kryteria informacyjne: AIC i FPE
+
+Dla bardziej obiektywnej identyfikacji rzędu p, obliczamy kryteria AIC (Akaike Information Criterion) i FPE (Final Prediction Error) dla zakresu p ∈ {0, 1, 2, ..., 20}.
+
+### Podejście I: Różnicowanie
+
+```{r criteria_diff}
+
+compute_ar_criteria <- function(data, max_p) {
+  n <- length(data)
+  results <- data.frame(p = 0:max_p, AIC = NA, FPE = NA)
+  
+  for (i in 0:max_p) {
+    tryCatch({
+      fit <- arima(data, order = c(i, 0, 0), method = "ML") 
+      results$AIC[i+1] <- fit$aic
+      results$FPE[i+1] <- fit$sigma2 * (n + i) / (n - i)
+    }, error = function(e) { results$AIC[i+1] <- NA })
+  }
+  return(results)
+}
+
+criteria_diff <- compute_ar_criteria(diff_series, max_p = 15)
+
+criteria_diff_top <- criteria_diff %>%
+  arrange(AIC) %>%
+  head(10)
+
+kable(criteria_diff_top,
+      digits = 4,
+      caption = tab_caption("Top 10 wartości AIC i FPE dla modeli AR(p) - Podejście I (Różnicowanie)"),
+      align = c('c', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+```{r fig_criteria_diff, fig.height=5, fig.cap=fig_caption("Kryteria AIC i FPE w funkcji rzędu p - Podejście I (Różnicowanie)")}
+plot_criteria(criteria_diff, "- Różnicowanie")
+```
+
+**Interpretacja**:
+
+- **AIC**: Minimalne AIC osiągnięto dla p = **`r criteria_diff$p[which.min(criteria_diff$AIC)]`**, co sugeruje model **AR(`r criteria_diff$p[which.min(criteria_diff$AIC)]`)**.
+- **FPE**: Minimalne FPE dla p = **`r criteria_diff$p[which.min(criteria_diff$FPE)]`**.
+
+**Wniosek**: Kryteria informacyjne wskazują jednoznacznie na model AR(5) jako optymalny dla szeregu po różnicowaniu.
+
+### Podejście II: Eliminacja trendu
+
+```{r criteria_detrend}
+# Obliczenie AIC i FPE dla detrendingu
+criteria_detrend <- compute_ar_criteria(detrended_series, max_p = 20)
+
+# Tabela z najlepszymi 10 wartościami
+criteria_detrend_top <- criteria_detrend %>%
+  arrange(AIC) %>%
+  head(10)
+
+kable(criteria_detrend_top,
+      digits = 4,
+      caption = tab_caption("Top 10 wartości AIC i FPE dla modeli AR(p) - Podejście II (Eliminacja trendu)"),
+      align = c('c', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+```{r fig_criteria_detrend, fig.height=5, fig.cap=fig_caption("Kryteria AIC i FPE w funkcji rzędu p - Podejście II (Eliminacja trendu)")}
+plot_criteria(criteria_detrend, "- Eliminacja trendu")
+```
+
+**Interpretacja**:
+
+- **AIC**: Minimalne AIC dla p = **`r criteria_detrend$p[which.min(criteria_detrend$AIC)]`**.
+- **FPE**: Minimalne FPE dla p = **`r criteria_detrend$p[which.min(criteria_detrend$FPE)]`**.
+
+**Wniosek**: Kryteria informacyjne wskazują jednoznacznie na model AR(1) jako optymalny dla szeregu po eliminacji trendu.
+
+## Porównanie identyfikacji dla obu podejść
+
+```{r comparison_identification}
+optimal_p_diff <- criteria_diff$p[which.min(criteria_diff$AIC)]
+optimal_p_detrend <- criteria_detrend$p[which.min(criteria_detrend$AIC)]
+
+comparison_id <- data.frame(
+  Metoda = c("Różnicowanie", "Eliminacja trendu"),
+  `Optymalny rząd p (AIC)` = c(optimal_p_diff, optimal_p_detrend),
+  `Min AIC` = c(min(criteria_diff$AIC), min(criteria_detrend$AIC)),
+  `Min FPE` = c(min(criteria_diff$FPE), min(criteria_detrend$FPE)),
+  check.names = FALSE
+)
+
+kable(comparison_id,
+      digits = 4,
+      caption = tab_caption("Porównanie optymalnych rzędów p dla obu podejść"),
+      align = c('l', 'c', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Wnioski**:
+
+- Dla szeregu po eliminacji trendu wielomianowego, struktura reszt jest prosta i najlepiej opisuje ją model AR(1). Oznacza to, że po odjęciu trendu deterministycznego, odchylenia temperatury mają charakter krótko-pamięciowy (proces Markowa).
+
+- Dla szeregu różnicowanego, kryteria wskazują na bardziej złożony model AR(5). Jest to częste zjawisko – różnicowanie skutecznie usuwa trend stochastyczny, ale może wprowadzać bardziej skomplikowane korelacje w krótkim okresie, wymagające dłuższego rzędu modelu do "wybielenia" szumu.
+
+- Warto zauważyć, że o ile model dla eliminacji trendu osiągnął niższą wartość AIC (-173.05) niż model dla różnicowania (-138.33), to nie można wyciągnąć wniosku, że jest lepiej dopasowany, ze względu na niemożność porównywania kryteriów informacyjnych dla różnych zmiennych objaśnianych.
+
+- W dalszej części dopasujemy modele AR(`r optimal_p_diff`) dla różnicowania oraz AR(`r optimal_p_detrend`) dla eliminacji trendu.
+
+---
+
+\newpage
+
+
+# Estymacja parametrów modeli AR(p)
+
+Dla zidentyfikowanych modeli przeprowadzimy estymację parametrów dwiema metodami:
+
+1. **Metoda Yule'a-Walkera** (YW) - estymacja wstępna oparta na autokorelacjach.
+2. **Metoda największej wiarogodności** (MLE) - estymacja maksymalizująca funkcję wiarogodności.
+
+## Podejście I: Różnicowanie
+
+### Model AR(`r optimal_p_diff`) - Metoda Yule'a-Walkera
+
+```{r optimal_p_change}
+optimal_p_diff <- max(1, criteria_diff$p[which.min(criteria_diff$AIC)])
+optimal_p_detrend <- max(1, criteria_detrend$p[which.min(criteria_detrend$AIC)])
+
+# nie działa dla 0
+
+```
+
+
+```{r ar_yw_diff}
+# Dopasowanie modelu AR metodą Yule'a-Walkera
+ar_yw_diff <- ar(diff_series, aic = FALSE, order.max = optimal_p_diff, method = "yule-walker")
+
+# Ekstrahowanie parametrów
+coef_yw_diff <- ar_yw_diff$ar
+se_yw_diff <- sqrt(diag(ar_yw_diff$asy.var.coef))
+var_yw_diff <- ar_yw_diff$var.pred
+
+# Tabela parametrów
+params_yw_diff <- data.frame(
+  Parametr = paste0("φ_", 1:optimal_p_diff),
+  Estymator = coef_yw_diff,
+  `Błąd std.` = se_yw_diff,
+  check.names = FALSE
+)
+
+kable(params_yw_diff,
+      digits = 4,
+      caption = tab_caption(paste0("Parametry modelu AR(", optimal_p_diff, 
+                                    ") - Metoda Yule'a-Walkera (Różnicowanie)")),
+      align = c('l', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Wariancja reszt**: σ² = `r round(var_yw_diff, 6)`
+
+### Model AR(`r optimal_p_diff`) - Metoda MLE
+
+```{r ar_mle_diff}
+# Dopasowanie modelu AR metodą MLE
+ar_mle_diff <- ar(diff_series, aic = FALSE, order.max = optimal_p_diff, method = "mle")
+
+# Ekstrahowanie parametrów
+coef_mle_diff <- ar_mle_diff$ar
+se_mle_diff <- sqrt(diag(ar_mle_diff$asy.var.coef))
+var_mle_diff <- ar_mle_diff$var.pred
+
+# Tabela parametrów
+params_mle_diff <- data.frame(
+  Parametr = paste0("φ_", 1:optimal_p_diff),
+  Estymator = coef_mle_diff,
+  `Błąd std.` = se_mle_diff,
+  check.names = FALSE
+)
+
+kable(params_mle_diff,
+      digits = 4,
+      caption = tab_caption(paste0("Parametry modelu AR(", optimal_p_diff, 
+                                    ") - Metoda MLE (Różnicowanie)")),
+      align = c('l', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Wariancja reszt**: σ² = `r round(var_mle_diff, 6)`
+
+### Porównanie metod YW i MLE
+
+```{r comparison_methods_diff}
+comparison_diff <- data.frame(
+  Parametr = paste0("φ_", 1:optimal_p_diff),
+  `YW - Estymator` = coef_yw_diff,
+  `YW - SE` = se_yw_diff,
+  `MLE - Estymator` = coef_mle_diff,
+  `MLE - SE` = se_mle_diff,
+  `Różnica estymat.` = abs(coef_yw_diff - coef_mle_diff),
+  check.names = FALSE
+)
+
+kable(comparison_diff,
+      digits = 4,
+      caption = tab_caption("Porównanie metod YW i MLE - Podejście I (Różnicowanie)"),
+      align = c('l', 'r', 'r', 'r', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja**:
+
+- Estymatory uzyskane metodami YW i MLE są **bardzo zbliżone**, co potwierdza zbieżność obu metod dla tego szeregu.
+- Błędy standardowe są również podobne, przy czym MLE może dać nieznacznie dokładniejsze oszacowania dla małych prób.
+- **Wariancja reszt** jest niemal identyczna dla obu metod.
+
+**Wniosek**: Ze względu na teoretyczną efektywność, w dalszej analizie będziemy korzystać z **metody MLE**.
+
+## Podejście II: Eliminacja trendu
+
+### Model AR(`r optimal_p_detrend`) - Metoda Yule'a-Walkera
+
+```{r ar_yw_detrend}
+# Dopasowanie modelu AR metodą Yule'a-Walkera
+ar_yw_detrend <- ar(detrended_series, aic = FALSE, order.max = optimal_p_detrend, 
+                    method = "yule-walker")
+
+# Ekstrahowanie parametrów
+coef_yw_detrend <- ar_yw_detrend$ar
+se_yw_detrend <- sqrt(diag(ar_yw_detrend$asy.var.coef))
+var_yw_detrend <- ar_yw_detrend$var.pred
+
+# Tabela parametrów
+params_yw_detrend <- data.frame(
+  Parametr = paste0("φ_", 1:optimal_p_detrend),
+  Estymator = coef_yw_detrend,
+  `Błąd std.` = se_yw_detrend,
+  check.names = FALSE
+)
+
+kable(params_yw_detrend,
+      digits = 4,
+      caption = tab_caption(paste0("Parametry modelu AR(", optimal_p_detrend, 
+                                    ") - Metoda Yule'a-Walkera (Eliminacja trendu)")),
+      align = c('l', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Wariancja reszt**: σ² = `r round(var_yw_detrend, 6)`
+
+### Model AR(`r optimal_p_detrend`) - Metoda MLE
+
+```{r ar_mle_detrend}
+# Dopasowanie modelu AR metodą MLE
+ar_mle_detrend <- ar(detrended_series, aic = FALSE, order.max = optimal_p_detrend, 
+                     method = "mle")
+
+# Ekstrahowanie parametrów
+coef_mle_detrend <- ar_mle_detrend$ar
+se_mle_detrend <- sqrt(diag(ar_mle_detrend$asy.var.coef))
+var_mle_detrend <- ar_mle_detrend$var.pred
+
+# Tabela parametrów
+params_mle_detrend <- data.frame(
+  Parametr = paste0("φ_", 1:optimal_p_detrend),
+  Estymator = coef_mle_detrend,
+  `Błąd std.` = se_mle_detrend,
+  check.names = FALSE
+)
+
+kable(params_mle_detrend,
+      digits = 4,
+      caption = tab_caption(paste0("Parametry modelu AR(", optimal_p_detrend, 
+                                    ") - Metoda MLE (Eliminacja trendu)")),
+      align = c('l', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Wariancja reszt**: σ² = `r round(var_mle_detrend, 6)`
+
+### Porównanie metod YW i MLE
+
+```{r comparison_methods_detrend}
+comparison_detrend <- data.frame(
+  Parametr = paste0("φ_", 1:optimal_p_detrend),
+  `YW - Estymator` = coef_yw_detrend,
+  `YW - SE` = se_yw_detrend,
+  `MLE - Estymator` = coef_mle_detrend,
+  `MLE - SE` = se_mle_detrend,
+  `Różnica estymat.` = abs(coef_yw_detrend - coef_mle_detrend),
+  check.names = FALSE
+)
+
+kable(comparison_detrend,
+      digits = 4,
+      caption = tab_caption("Porównanie metod YW i MLE - Podejście II (Eliminacja trendu)"),
+      align = c('l', 'r', 'r', 'r', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja**: Analogicznie jak w Podejściu I, estymatory są bardzo zbliżone, potwierdzając spójność obu metod.
+
+---
+
+\newpage
+
+
+# Asymptotyczne przedziały ufności i weryfikacja istotności parametrów
+
+Opierając się na **twierdzeniu o asymptotycznej normalności estymatorów MLE**, konstruujemy 95\% przedziały ufności dla parametrów modeli AR(p) i weryfikujemy ich statystyczną istotność.
+
+## Podejście I: Różnicowanie
+
+```{r ci_diff}
+# Konstrukcja 95\\% przedziałów ufności
+alpha <- 0.05
+z_crit <- qnorm(1 - alpha/2)
+
+ci_diff <- data.frame(
+  Parametr = paste0("φ_", 1:optimal_p_diff),
+  Estymator = coef_mle_diff,
+  `SE` = se_mle_diff,
+  `95\\% CI - Dolna` = coef_mle_diff - z_crit * se_mle_diff,
+  `95\\% CI - Górna` = coef_mle_diff + z_crit * se_mle_diff,
+  `p-value` = 2 * (1 - pnorm(abs(coef_mle_diff / se_mle_diff))),
+  `Istotny (α=0.05)` = ifelse(
+    2 * (1 - pnorm(abs(coef_mle_diff / se_mle_diff))) < alpha, 
+    "Tak", "Nie"),
+  check.names = FALSE
+)
+
+kable(ci_diff,
+      digits = 4,
+      caption = tab_caption(paste0("Asymptotyczne przedziały ufności (95\\%) dla parametrów modelu AR(", 
+                                    optimal_p_diff, ") - Różnicowanie")),
+      align = c('l', 'r', 'r', 'r', 'r', 'r', 'c')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja**:
+
+```{r interpret_ci_diff, echo=FALSE, results='asis'}
+significant_params_diff <- ci_diff %>% filter(`Istotny (α=0.05)` == "Tak")
+if (nrow(significant_params_diff) > 0) {
+  cat("- **Parametry istotne statystycznie**: ", 
+      paste(significant_params_diff$Parametr, collapse = ", "), "\n")
+} else {
+  cat("- **Brak istotnych statystycznie parametrów** (co byłoby nieoczekiwane dla wybranego modelu).\n")
+}
+
+nonsignificant_params_diff <- ci_diff %>% filter(`Istotny (α=0.05)` == "Nie")
+if (nrow(nonsignificant_params_diff) > 0) {
+  cat("- **Parametry nieistotne statystycznie**: ", 
+      paste(nonsignificant_params_diff$Parametr, collapse = ", "), 
+      ". Może to sugerować możliwość uproszczenia modelu.\n")
+}
+```
+
+**Wniosek**: `r if(nrow(nonsignificant_params_diff) > 0) paste0("Model AR(", optimal_p_diff, ") zawiera parametry nieistotne statystycznie, co może wskazywać na przeparametryzowanie. Warto rozważyć model niższego rzędu lub restrykcje na współczynniki.") else paste0("Wszystkie parametry modelu AR(", optimal_p_diff, ") są istotne statystycznie, potwierdzając trafność wyboru rzędu p.")`
+
+## Podejście II: Eliminacja trendu
+
+```{r ci_detrend}
+# Konstrukcja 95\\% przedziałów ufności
+ci_detrend <- data.frame(
+  Parametr = paste0("φ_", 1:optimal_p_detrend),
+  Estymator = coef_mle_detrend,
+  `SE` = se_mle_detrend,
+  `95\\% CI - Dolna` = coef_mle_detrend - z_crit * se_mle_detrend,
+  `95\\% CI - Górna` = coef_mle_detrend + z_crit * se_mle_detrend,
+  `p-value` = 2 * (1 - pnorm(abs(coef_mle_detrend / se_mle_detrend))),
+  `Istotny (α=0.05)` = ifelse(
+    2 * (1 - pnorm(abs(coef_mle_detrend / se_mle_detrend))) < alpha, 
+    "Tak", "Nie"),
+  check.names = FALSE
+)
+
+kable(ci_detrend,
+      digits = 4,
+      caption = tab_caption(paste0("Asymptotyczne przedziały ufności (95\\%) dla parametrów modelu AR(", 
+                                    optimal_p_detrend, ") - Eliminacja trendu")),
+      align = c('l', 'r', 'r', 'r', 'r', 'r', 'c')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja**:
+
+```{r interpret_ci_detrend, echo=FALSE, results='asis'}
+significant_params_detrend <- ci_detrend %>% filter(`Istotny (α=0.05)` == "Tak")
+if (nrow(significant_params_detrend) > 0) {
+  cat("- **Parametry istotne statystycznie**: ", 
+      paste(significant_params_detrend$Parametr, collapse = ", "), "\n")
+}
+
+nonsignificant_params_detrend <- ci_detrend %>% filter(`Istotny (α=0.05)` == "Nie")
+if (nrow(nonsignificant_params_detrend) > 0) {
+  cat("- **Parametry nieistotne statystycznie**: ", 
+      paste(nonsignificant_params_detrend$Parametr, collapse = ", "), "\n")
+}
+```
+
+**Wniosek**: `r if(nrow(nonsignificant_params_detrend) > 0) paste0("Podobnie jak w Podejściu I, obecność nieistotnych parametrów sugeruje możliwość uproszczenia modelu.") else paste0("Wszystkie parametry są istotne, potwierdzając adekwatność modelu AR(", optimal_p_detrend, ").")`
+
+---
+
+\newpage
+
+
+# Diagnostyka modeli - Analiza reszt
+
+Kluczowym etapem weryfikacji poprawności dopasowania modeli AR(p) jest analiza reszt. Reszty powinny być **białym szumem**, tzn. nieskorelowane, o stałej wariancji i rozkładzie normalnym.
+
+## Podejście I: Różnicowanie
+
+### Wykresy diagnostyczne
+
+```{r fig_diagnostics_diff, fig.height=8, fig.cap=fig_caption(paste0("Diagnostyka reszt modelu AR(", optimal_p_diff, ") - Różnicowanie"))}
+# Pobranie reszt i usunięcie wartości NA (na.omit)
+residuals_diff <- na.omit(residuals(ar_mle_diff))
+
+# Teraz diagnostyka powinna ruszyć
+diagnostic_plots(residuals_diff, paste0("AR(", optimal_p_diff, ") Różnicowanie"))
+```
+
+**Interpretacja wykresów**:
+
+- **Szereg reszt w czasie**: Reszty oscylują wokół zera bez widocznych wzorców, co sugeruje brak systematycznych odchyleń.
+- **Histogram**: Rozkład reszt jest w przybliżeniu symetryczny i zbliżony do rozkładu normalnego.
+- **Q-Q plot**: Punkty układają się wzdłuż linii teoretycznej, potwierdzając normalność rozkładu reszt.
+- **ACF reszt**: Brak istotnych autokorelacji poza lag 0, co wskazuje na brak autokorelacji reszt.
+
+### Testy białoszumowości
+
+```{r whitenoise_diff}
+wn_tests_diff <- whitenoise_tests(residuals_diff, lag_max = 20, alpha = 0.05)
+
+kable(wn_tests_diff$ljung_box,
+      caption = tab_caption(paste0("Test Ljung-Box dla reszt modelu AR(", optimal_p_diff, 
+                                    ") - Różnicowanie")),
+      align = c('c', 'r', 'r', 'l')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+
+kable(wn_tests_diff$graphic,
+      caption = tab_caption(paste0("Test graficzny (ACF) dla reszt modelu AR(", optimal_p_diff, 
+                                    ") - Różnicowanie")),
+      align = c('l', 'r', 'r', 'l')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja testów białoszumowości**:
+
+- **Test Ljung-Box**: `r if(all(wn_tests_diff$ljung_box$'p-value' >= 0.05)) "Dla wszystkich rozważanych opóźnień nie odrzucamy H₀ (p ≥ 0.05), co potwierdza, że reszty są nieskorelowane (biały szum)." else "Dla niektórych opóźnień odrzucamy H₀, co może wskazywać na pozostałą autokorelację w resztach."`
+
+- **Test graficzny (ACF)**: `r wn_tests_diff$graphic$Decyzja`. Częstość przekroczeń przedziałów istotności wynosi `r wn_tests_diff$graphic$'Częstość przekroczeń'`, co jest `r if(grepl("Biały szum", wn_tests_diff$graphic$Decyzja)) "zgodne z oczekiwaniami dla białego szumu (około 5% dla α=0.05)." else "powyżej oczekiwanego poziomu, sugerując możliwą autokorelację."`
+
+**Wniosek**: `r if(all(wn_tests_diff$ljung_box$'p-value' >= 0.05) & grepl("Biały szum", wn_tests_diff$graphic$Decyzja)) paste0("Reszty modelu AR(", optimal_p_diff, ") spełniają założenie białoszumowości, co potwierdza poprawność dopasowania modelu.") else paste0("Istnieją pewne przesłanki, że reszty mogą nie być w pełni nieskorelowane, co może wymagać dalszej analizy lub modyfikacji modelu.")`
+
+### Testy normalności reszt
+
+```{r normality_diff}
+# Test Shapiro-Wilka
+shapiro_test_diff <- shapiro.test(residuals_diff)
+
+# Test Jarque-Bera
+jb_test_diff <- jarque.bera.test(residuals_diff)
+
+normality_tests_diff <- data.frame(
+  Test = c("Shapiro-Wilk", "Jarque-Bera"),
+  Statystyka = c(shapiro_test_diff$statistic, jb_test_diff$statistic),
+  `p-value` = c(shapiro_test_diff$p.value, jb_test_diff$p.value),
+  `Wniosek ($\\alpha$=0.05)` = c(
+    ifelse(shapiro_test_diff$p.value < 0.05, "Odrzucamy H0 (nie normalny)", 
+           "Nie odrzucamy H0 (normalny)"),
+    ifelse(jb_test_diff$p.value < 0.05, "Odrzucamy H0 (nie normalny)", 
+           "Nie odrzucamy H0 (normalny)")
+  ),
+  check.names = FALSE
+)
+
+kable(normality_tests_diff,
+      digits = 4,
+      caption = tab_caption(paste0("Testy normalności reszt modelu AR(", optimal_p_diff, 
+                                    ") - Różnicowanie")),
+      align = c('l', 'r', 'r', 'l')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja testów normalności**:
+
+- **Test Shapiro-Wilka**: `r if(shapiro_test_diff$p.value < 0.05) "Odrzucamy H₀ (p < 0.05), co wskazuje na odchylenie od rozkładu normalnego." else "Nie odrzucamy H₀ (p ≥ 0.05), potwierdzając normalność reszt."`
+
+- **Test Jarque-Bera**: `r if(jb_test_diff$p.value < 0.05) "Odrzucamy H₀ (p < 0.05), co wskazuje na odchylenie od rozkładu normalnego." else "Nie odrzucamy H₀ (p ≥ 0.05), potwierdzając normalność reszt."`
+
+**Wniosek**: `r if(shapiro_test_diff$p.value >= 0.05 & jb_test_diff$p.value >= 0.05) "Reszty można uznać za pochodzące z rozkładu normalnego, co spełnia założenia modelu AR." else "Istnieją odchylenia od normalności, które mogą wpływać na wnioskowanie, choć modele AR są relatywnie odporne na takie odchylenia dla dużych prób."`
+
+## Podejście II: Eliminacja trendu
+
+### Wykresy diagnostyczne
+
+```{r fig_diagnostics_detrend, fig.height=8, fig.cap=fig_caption(paste0("Diagnostyka reszt modelu AR(", optimal_p_detrend, ") - Eliminacja trendu"))}
+residuals_detrend <- na.omit(residuals(ar_mle_detrend))
+diagnostic_plots(residuals_detrend, paste0("AR(", optimal_p_detrend, ") Detrending"))
+```
+
+**Interpretacja wykresów**: Analogicznie jak w Podejściu I, reszty oscylują wokół zera, rozkład jest zbliżony do normalnego, a ACF nie wykazuje istotnych autokorelacji.
+
+### Testy białoszumowości
+
+```{r whitenoise_detrend}
+wn_tests_detrend <- whitenoise_tests(residuals_detrend, lag_max = 20, alpha = 0.05)
+
+kable(wn_tests_detrend$ljung_box,
+      caption = tab_caption(paste0("Test Ljung-Box dla reszt modelu AR(", optimal_p_detrend, 
+                                    ") - Eliminacja trendu")),
+      align = c('c', 'r', 'r', 'l')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+
+kable(wn_tests_detrend$graphic,
+      caption = tab_caption(paste0("Test graficzny (ACF) dla reszt modelu AR(", optimal_p_detrend, 
+                                    ") - Eliminacja trendu")),
+      align = c('l', 'r', 'r', 'l')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja**: `r if(all(wn_tests_detrend$ljung_box$'p-value' >= 0.05) & grepl("Biały szum", wn_tests_detrend$graphic$Decyzja)) "Reszty spełniają założenie białoszumowości." else "Istnieją pewne przesłanki autokorelacji w resztach."`
+
+### Testy normalności reszt
+
+```{r normality_detrend}
+# Test Shapiro-Wilka
+shapiro_test_detrend <- shapiro.test(residuals_detrend)
+
+# Test Jarque-Bera
+jb_test_detrend <- jarque.bera.test(residuals_detrend)
+
+normality_tests_detrend <- data.frame(
+  Test = c("Shapiro-Wilk", "Jarque-Bera"),
+  Statystyka = c(shapiro_test_detrend$statistic, jb_test_detrend$statistic),
+  `p-value` = c(shapiro_test_detrend$p.value, jb_test_detrend$p.value),
+  `Wniosek ($\\alpha$=0.05)` = c(
+    ifelse(shapiro_test_detrend$p.value < 0.05, "Odrzucamy H0 (nie normalny)", 
+           "Nie odrzucamy H0 (normalny)"),
+    ifelse(jb_test_detrend$p.value < 0.05, "Odrzucamy H0 (nie normalny)", 
+           "Nie odrzucamy H0 (normalny)")
+  ),
+  check.names = FALSE
+)
+
+kable(normality_tests_detrend,
+      digits = 4,
+      caption = tab_caption(paste0("Testy normalności reszt modelu AR(", optimal_p_detrend, 
+                                    ") - Eliminacja trendu")),
+      align = c('l', 'r', 'r', 'l')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Interpretacja**: `r if(shapiro_test_detrend$p.value >= 0.05 & jb_test_detrend$p.value >= 0.05) "Reszty są zgodne z rozkładem normalnym." else "Istnieją odchylenia od normalności w resztach."`
+
+## Porównanie diagnostyki dla obu podejść
+
+```{r comparison_diagnostics}
+comparison_diag <- data.frame(
+  Metoda = c("Różnicowanie", "Eliminacja trendu"),
+  `Test Ljung-Box (p > 0.05)` = c(
+    all(wn_tests_diff$ljung_box$'p-value' >= 0.05),
+    all(wn_tests_detrend$ljung_box$'p-value' >= 0.05)
+  ),
+  `Test graficzny` = c(
+    wn_tests_diff$graphic$Decyzja,
+    wn_tests_detrend$graphic$Decyzja
+  ),
+  `Shapiro-Wilk (p > 0.05)` = c(
+    shapiro_test_diff$p.value >= 0.05,
+    shapiro_test_detrend$p.value >= 0.05
+  ),
+  `Jarque-Bera (p > 0.05)` = c(
+    jb_test_diff$p.value >= 0.05,
+    jb_test_detrend$p.value >= 0.05
+  ),
+  check.names = FALSE
+)
+
+kable(comparison_diag,
+      caption = tab_caption("Podsumowanie diagnostyki reszt dla obu podejść"),
+      align = c('l', 'c', 'l', 'c', 'c')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+**Wnioski porównawcze**:
+
+- Oba podejścia prowadzą do modeli, których reszty spełniają założenia białoszumowości.
+- Diagnostyka reszt nie wskazuje jednoznacznie na przewagę jednego podejścia nad drugim w zakresie jakości dopasowania.
+- Ewentualne drobne odchylenia od idealnego białego szumu są akceptowalne w kontekście rzeczywistych danych klimatycznych.
+
+---
+
+\newpage
+
+# Prognozowanie
+
+Wykorzystujemy dopasowane modele AR(p) do konstrukcji prognoz temperatury globalnej na kolejne **10 lat** (h = 10). Kluczowe jest **odwrócenie transformacji wstępnych**, aby prognozy były wyrażone w skali oryginalnej.
+
+## Podejście I: Różnicowanie
+
+### Prognozy w skali różnicowanej
+
+```{r forecast_diff_transformed}
+h <- 10
+forecast_diff <- forecast_ar(ar_mle_diff, h = h)
+
+forecast_df_diff_trans <- data.frame(
+  Okres = 1:h,
+  Prognoza = forecast_diff$forecasts,
+  `95\\% PI - Dolna` = forecast_diff$lower,
+  `95\\% PI - Górna` = forecast_diff$upper,
+  check.names = FALSE
+)
+
+kable(forecast_df_diff_trans,
+      digits = 4,
+      caption = tab_caption(paste0("Prognozy z modelu AR(", optimal_p_diff, 
+                                    ") - skala różnicowana (Różnicowanie)")),
+      align = c('c', 'r', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+### Odwrócenie transformacji (integracja)
+
+Ponieważ zastosowaliśmy różnicowanie pierwszego rzędu, prognozy dotyczą **przyrostów** temperatury. Aby uzyskać prognozy w skali oryginalnej, musimy **zintegrować** różnice, zaczynając od ostatniej obserwowanej wartości szeregu oryginalnego.
+
+```{r forecast_diff_original}
+# Odwrócenie różnicowania
+forecast_diff_orig <- forecast_ar(ar_mle_diff, h = h, 
+                                  original_series = temp_series,
+                                  transformed_type = "diff",
+                                  diff_order = 1)
+
+future_years <- max(years) + (1:h)
+
+forecast_df_diff_orig <- data.frame(
+  Rok = future_years,
+  Prognoza = forecast_diff_orig$forecasts,
+  `95\\% PI - Dolna` = forecast_diff_orig$lower,
+  `95\\% PI - Górna` = forecast_diff_orig$upper,
+  check.names = FALSE
+)
+
+kable(forecast_df_diff_orig,
+      digits = 4,
+      caption = tab_caption(paste0("Prognozy z modelu AR(", optimal_p_diff, 
+                                    ") - skala oryginalna po integracji (Różnicowanie)")),
+      align = c('c', 'r', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+### Wizualizacja prognoz
+
+```{r fig_forecast_diff, fig.height=6, fig.cap=fig_caption("Prognozy temperatury globalnej - Podejście I (Różnicowanie)")}
+# Dane historyczne + prognozy
+hist_df <- data.frame(
+  Year = as.numeric(years),
+  Temperature = as.numeric(temp_series),
+  Type = "Obserwacje"
+)
+
+forecast_plot_df <- data.frame(
+  Year = future_years,
+  Temperature = forecast_diff_orig$forecasts,
+  Lower = forecast_diff_orig$lower,
+  Upper = forecast_diff_orig$upper,
+  Type = "Prognoza"
+)
+
+ggplot() +
+  geom_line(data = hist_df, aes(x = Year, y = Temperature), 
+            color = "steelblue", size = 0.8) +
+  geom_line(data = forecast_plot_df, aes(x = Year, y = Temperature), 
+            color = "darkred", size = 1, linetype = "dashed") +
+  geom_ribbon(data = forecast_plot_df, 
+              aes(x = Year, ymin = Lower, ymax = Upper),
+              fill = "darkred", alpha = 0.2) +
+  labs(title = "Prognozy temperatury globalnej - Różnicowanie",
+       subtitle = paste0("Model AR(", optimal_p_diff, ") z różnicowaniem pierwszego rzędu"),
+       x = "Rok",
+       y = "Odchylenie temperatury (°C)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+**Interpretacja prognoz**:
+
+- Prognozy wskazują na **kontynuację trendu wzrostowego** temperatury globalnej, zgodnie z obserwowaną dynamiką w danych historycznych.
+- Przedziały predykcji rozszerzają się wraz z horyzontem prognozy, co odzwierciedla rosnącą niepewność dla dalszych okresów.
+- Model AR po różnicowaniu generuje prognozy bazujące na ostatnich zmianach, co może prowadzić do stabilizacji trendu w długim okresie.
+
+## Podejście II: Eliminacja trendu
+
+### Prognozy reszt (bez trendu)
+
+```{r forecast_detrend_residuals}
+forecast_detrend <- forecast_ar(ar_mle_detrend, h = h)
+
+forecast_df_detrend_res <- data.frame(
+  Okres = 1:h,
+  `Prognoza reszt` = forecast_detrend$forecasts,
+  `95\\% PI - Dolna` = forecast_detrend$lower,
+  `95\\% PI - Górna` = forecast_detrend$upper,
+  check.names = FALSE
+)
+
+kable(forecast_df_detrend_res,
+      digits = 4,
+      caption = tab_caption(paste0("Prognozy reszt z modelu AR(", optimal_p_detrend, 
+                                    ") - bez trendu (Eliminacja trendu)")),
+      align = c('c', 'r', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+### Odwrócenie transformacji (dodanie trendu)
+
+Aby uzyskać prognozy w skali oryginalnej, dodajemy z powrotem **prognozowany trend wielomianowy** dla przyszłych okresów.
+
+```{r forecast_detrend_original}
+# Odwrócenie detrendingu
+forecast_detrend_orig <- forecast_ar(ar_mle_detrend, h = h,
+                                     original_series = temp_series,
+                                     transformed_type = "detrend",
+                                     trend_fit = trend_fit)
+
+forecast_df_detrend_orig <- data.frame(
+  Rok = future_years,
+  Prognoza = forecast_detrend_orig$forecasts,
+  `95\\% PI - Dolna` = forecast_detrend_orig$lower,
+  `95\\% PI - Górna` = forecast_detrend_orig$upper,
+  check.names = FALSE
+)
+
+kable(forecast_df_detrend_orig,
+      digits = 4,
+      caption = tab_caption(paste0("Prognozy z modelu AR(", optimal_p_detrend, 
+                                    ") - skala oryginalna po dodaniu trendu (Eliminacja trendu)")),
+      align = c('c', 'r', 'r', 'r')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+### Wizualizacja prognoz
+
+```{r fig_forecast_detrend, fig.height=6, fig.cap=fig_caption("Prognozy temperatury globalnej - Podejście II (Eliminacja trendu)")}
+# Dane historyczne + prognozy
+forecast_plot_df_detrend <- data.frame(
+  Year = future_years,
+  Temperature = forecast_detrend_orig$forecasts,
+  Lower = forecast_detrend_orig$lower,
+  Upper = forecast_detrend_orig$upper,
+  Type = "Prognoza"
+)
+
+ggplot() +
+  geom_line(data = hist_df, aes(x = Year, y = Temperature), 
+            color = "steelblue", size = 0.8) +
+  geom_line(data = forecast_plot_df_detrend, aes(x = Year, y = Temperature), 
+            color = "darkgreen", size = 1, linetype = "dashed") +
+  geom_ribbon(data = forecast_plot_df_detrend, 
+              aes(x = Year, ymin = Lower, ymax = Upper),
+              fill = "darkgreen", alpha = 0.2) +
+  labs(title = "Prognozy temperatury globalnej - Eliminacja trendu",
+       subtitle = paste0("Model AR(", optimal_p_detrend, 
+                        ") z eliminacją trendu wielomianowego (stopień ", optimal_degree, ")"),
+       x = "Rok",
+       y = "Odchylenie temperatury (°C)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+**Interpretacja prognoz**:
+
+- Prognozy z tego podejścia również wskazują na **wzrost temperatury**, zgodnie z ekstrapolacją trendu wielomianowego.
+- W zależności od stopnia wielomianu, prognozy mogą wykazywać **przyspieszenie** (dla wielomianów wyższych stopni) lub bardziej **liniowy** wzrost.
+- Przedziały predykcji są o wiele węższe, niż w Podejściu I.
+
+## Porównanie prognoz
+
+```{r comparison_forecasts, fig.height=6, fig.cap=fig_caption("Porównanie prognoz z obu podejść modelowania")}
+# Połączenie prognoz z obu podejść
+forecast_combined <- rbind(
+  data.frame(Year = future_years, 
+             Temperature = forecast_diff_orig$forecasts,
+             Lower = forecast_diff_orig$lower,
+             Upper = forecast_diff_orig$upper,
+             Method = "Różnicowanie"),
+  data.frame(Year = future_years, 
+             Temperature = forecast_detrend_orig$forecasts,
+             Lower = forecast_detrend_orig$lower,
+             Upper = forecast_detrend_orig$upper,
+             Method = "Eliminacja trendu")
+)
+
+ggplot() +
+  geom_line(data = hist_df, aes(x = Year, y = Temperature), 
+            color = "gray50", size = 0.6, alpha = 0.7) +
+  geom_line(data = forecast_combined, 
+            aes(x = Year, y = Temperature, color = Method, linetype = Method),
+            size = 1) +
+  geom_ribbon(data = forecast_combined, 
+              aes(x = Year, ymin = Lower, ymax = Upper, fill = Method),
+              alpha = 0.2) +
+  scale_color_manual(values = c("Różnicowanie" = "darkred", 
+                                 "Eliminacja trendu" = "darkgreen")) +
+  scale_fill_manual(values = c("Różnicowanie" = "darkred", 
+                                "Eliminacja trendu" = "darkgreen")) +
+  scale_linetype_manual(values = c("Różnicowanie" = "dashed", 
+                                    "Eliminacja trendu" = "dotdash")) +
+  labs(title = "Porównanie prognoz temperatury globalnej",
+       subtitle = "Różnicowanie vs Eliminacja trendu",
+       x = "Rok",
+       y = "Odchylenie temperatury (°C)",
+       color = "Metoda",
+       fill = "Metoda",
+       linetype = "Metoda") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5),
+        legend.position = "bottom")
+```
+
+**Interpretacja porównania**:
+
+```{r comparison_forecast_analysis, echo=FALSE, results='asis'}
+mean_forecast_diff <- mean(forecast_diff_orig$forecasts)
+mean_forecast_detrend <- mean(forecast_detrend_orig$forecasts)
+
+cat("- **Średnia prognoz (10 lat)**:\n")
+cat("  - Różnicowanie: ", round(mean_forecast_diff, 4), "°C\n")
+cat("  - Eliminacja trendu: ", round(mean_forecast_detrend, 4), "°C\n\n")
+```
+
+**Wnioski**:
+
+- Oba podejścia prowadzą do prognoz wskazujących na **dalszy wzrost temperatury globalnej**, zgodnie z obserwowanym trendem historycznym.
+
+- **Eliminacja trendu**: 
+Model przewiduje dynamiczny, wykładniczy wzrost temperatury (osiągając ok. 1.77°C w 2033 r.). Wynika to ze "sztywnego" założenia, że trend opisany wielomianem 5. stopnia będzie kontynuowany w przyszłości bez zakłóceń.
+
+- **Różnicowanie**: 
+Prognoza jest znacznie bardziej konserwatywna i niemal płaska (stabilizacja wokół 1.25°C). Model ten, bazując na stochastycznej naturze procesu, zakłada, że przyszłe przyrosty będą oscylować wokół średniej z przeszłości, nie wymuszając mechanicznie dalszego wzrostu.
+
+- Różnica w szerokości przedziałów ufności jest drastyczna i wynika z fundamentalnych różnic w konstrukcji modeli:
+
+Mimo uwzględnienia błędu estymacji trendu (SE fit), przedziały ufności dla metody detrendingu pozostają wąskie i stabilne (kształt tunelu). Wynika to z faktu, że model ten traktuje trend jako zjawisko deterministyczne (sztywne). Przy dużej próbie (174 lata) błąd dopasowania wielomianu jest znikomy w porównaniu do wariancji reszt.
+
+Stoi to w jaskrawym kontraście do metody różnicowania (model stochastyczny), gdzie niepewność kumuluje się z każdym krokiem ("lejek"). Wąski tunel w metodzie detrendingu jest matematycznie poprawny przy przyjętych założeniach, ale może dawać złudne poczucie pewności co do przyszłości, ignorując możliwość zmiany strukturalnej trendu, której wielomian nie jest w stanie przewidzieć.
+
+Wielomian 5. stopnia może w przyszłości "przestrzelić" rzeczywistość. Podejście różnicowe jest matematycznie bezpieczniejsze (nie narzuca kształtu przyszłości), ale w długim horyzoncie czasowym generuje tak dużą niepewność, że prognoza staje się mało informatywna dla decydentów.
+
+---
+
+\newpage
+
+# Wnioski końcowe
+
+## Porównanie podejść modelowania
+
+W niniejszym sprawozdaniu przeprowadzono kompleksową analizę szeregu czasowego `gtemp_both`, porównując dwa alternatywne podejścia do osiągnięcia stacjonarności i dopasowania modeli autoregresyjnych AR(p):
+
+1. **Podejście I: Różnicowanie pierwszego rzędu**
+2. **Podejście II: Eliminacja trendu wielomianowego (stopień `r optimal_degree`)**
+
+### Mocne strony różnicowania
+
+- **Prostota**: Łatwość implementacji i brak konieczności wyboru parametrów (stopnia wielomianu).
+- **Brak założeń o postaci trendu**: Nie wymaga specyfikacji funkcyjnej trendu, co czyni je bardziej ogólnym.
+- **Skuteczność w eliminacji trendu**: Testy stacjonarności (ADF) potwierdzają osiągnięcie stacjonarności.
+- **Prognozy krótkoterminowe**: Dobrze sprawdza się w prognozowaniu najbliższych okresów, bazując na ostatnich zmianach.
+
+### Słabe strony różnicowania
+
+- **Utrata interpretacji trendu**: Różnicowanie usuwa informację o trendie, co utrudnia bezpośrednią interpretację długoterminowych zmian.
+- **Prognozy długoterminowe**: Tendencja do stabilizacji prognoz, co może nie odzwierciedlać rzeczywistych długoterminowych trendów klimatycznych.
+- **Odwrócenie transformacji**: Konieczność integracji różnic dla uzyskania prognoz w skali oryginalnej, co zwiększa złożoność obliczeń.
+- **Kumulowanie się błędów prognozy**: Błąd prognozy to suma błędów prognoz przyrostów, co tłumaczy szerokie przedziały ufności.
+
+### Mocne strony eliminacji trendu wielomianowego
+
+- **Interpretacja trendu**: Bezpośrednia wizualizacja i interpretacja długoterminowego trendu deterministycznego.
+- **Ekstrapolacja trendu**: Możliwość prognozowania przyszłych wartości trendu, co jest istotne dla analiz klimatycznych.
+- **Elastyczność**: Wybór stopnia wielomianu pozwala na dopasowanie różnych kształtów trendu (liniowy, kwadratowy, sześcienny).
+- **Reszty stacjonarne**: Skuteczna eliminacja trendu prowadzi do stacjonarnych reszt, spełniających założenia modeli AR.
+
+### Słabe strony eliminacji trendu wielomianowego
+
+- **Ryzyko przeuczenia**: Wielomiany wyższych stopni mogą nadmiernie dopasować się do danych historycznych, prowadząc do nierealistycznych ekstrapolacji.
+- **Wybór stopnia wielomianu**: Konieczność decyzji o stopniu wielomianu, co wprowadza element subiektywności (choć można zastosować kryteria AIC).
+- **Ekstremalne prognozy**: Dla wielomianów stopnia ≥ 3, ekstrapolacja może prowadzić do ekstremalnych wartości w długim terminie.
+
+
+## Jakość dopasowania i diagnostyka
+
+### Porównanie reszt
+
+Analiza reszt dla obu podejść wykazała:
+
+- **Białoszumowość**: 
+Oba modele generują reszty, które w świetle testów Ljunga-Boxa oraz testu graficznego można uznać za nieskorelowane.
+
+- **Normalność**: 
+Testy Shapiro-Wilka i Jarque-Bera nie wskazują na drastyczne odchylenia od rozkładu normalnego, choć mogą występować niewielkie; typowe dla danych rzeczywistych.
+
+- **Stałość wariancji**: 
+Wykresy reszt w czasie nie wykazują wyraźnej heteroskedastyczności.
+
+- **Wniosek**: Oba podejścia prowadzą do modeli o porównywalnej jakości dopasowania, spełniających założenia modelowania autoregresyjnego.
+
+
+
+### Kryteria informacyjne
+
+
+- **Model AR(5) po różnicowaniu**: AIC = -138.33
+
+- **Model AR(1) po detrendingu**: AIC = -173.05
+
+- **Model po detrendingu** ma niższe AIC, należy jednak pamiętać, że to nic nam nie mówi, gdyż modele operują na różnych transformacjach danych.
+
+
+### Jakość prognoz
+
+Prognozy z obu podejść wskazują na:
+
+- **Kontynuację trendu wzrostowego** temperatury globalnej w najbliższej dekadzie.
+
+- **Przyspieszenie wzrostu** w modelu z detrendingiem wielomianowym.
+
+- **Bardziej konserwatywne prognozy** w modelu po różnicowaniu.
+
+- **Drastyczną różnicę w niepewności**: model różnicowy generuje bardzo szerokie przedziały, podczas gdy model z detrendingiem daje wąskie. Wąskie przedziały w modelu z detrendingiem wynikają z założenia, że trend deterministyczny jest znany z pewnością, co w przypadku danych klimatycznych może prowadzić do nadmiernej pewności prognozy.
+
+
+### Prostota interpretacji
+
+**Różnicowanie**: 
+Trudniejsza interpretacja dla osób nieobeznanych z analizą szeregów czasowych, ponieważ prognozy dotyczą przyrostów, a następnie wymagają integracji.
+
+**Eliminacja trendu**: 
+Bardziej intuicyjna, ponieważ trend jest wyraźnie wyodrębniony i można go bezpośrednio interpretować jako długoterminową zmianę klimatyczną.
+
+## Rekomendacje
+
+Na podstawie przeprowadzonej analizy formułujemy następujące rekomendacje:
+
+### Dla prognoz krótkoterminowych (1-5 lat)
+
+**Rekomendacja** - Zastosowanie różnicowania może być preferowane ze względu na:
+
+- Brak ryzyka przeuczenia trendu.
+- Dokładniejsze odzwierciedlenie ostatnich dynamik zmian.
+- Prostotę implementacji bez konieczności wyboru stopnia wielomianu.
+
+### Dla analiz długoterminowych i interpretacji trendu
+
+**Rekomendacja** - Zastosowanie eliminacji trendu wielomianowego (stopień 2, ewentualnie 3) jest bardziej odpowiednie ze względu na:
+
+- Możliwość bezpośredniej interpretacji długoterminowego trendu klimatycznego.
+- Ekstrapolację trendu zgodną z prognozami naukowymi dotyczącymi globalnego ocieplenia.
+- Lepszą komunikację wyników do odbiorców niebędących specjalistami.
+
+**UWAGA KRYTYCZNA**:
+
+Przy wyborze wielomianów stopnia ≥ 3 należy zachować ostrożność, ponieważ ekstrapolacja może prowadzić do nierealistycznie wysokich lub niskich wartości w dalekiej przyszłości. Z punktu widzenia klimatologii, wielomian 4. czy 5. stopnia dla szeregu czasowego temperatury niemal zawsze uważa się za overfitting. Zaleca się stosowanie wielomianów stopnia 2 (parabolicznych) dla równowagi między dopasowaniem a stabilnością ekstrapolacji.
+
+
+### Dla maksymalnej wiarygodności analiz
+
+**Rekomendacja** - Stosowanie obu podejść równolegle i porównywanie wyników pozwala na:
+
+- Weryfikację spójności wniosków.
+- Ocenę wrażliwości prognoz na metodę modelowania.
+- Budowanie przedziałów niepewności uwzględniających niepewność modelową.
+
+---
+
+\newpage
+
+# Podsumowanie 
+
+## Niniejsza analiza wykazała:
+
+1. Szereg `gtemp_both` wymaga transformacji w celu osiągnięcia stacjonarności, zarówno poprzez różnicowanie, jak i eliminację trendu wielomianowego.
+
+2. Oba podejścia są skuteczne w transformacji szeregu do postaci stacjonarnej i prowadzą do modeli AR(p) o porównywalnej jakości dopasowania.
+
+3. Wybór metody powinien zależeć od celu analizy:
+
+- Różnicowanie dla prognoz krótkoterminowych i unikania założeń o formie trendu.
+- Eliminacja trendu dla interpretacji długoterminowych zmian i komunikacji wyników.
+
+4. Prognozy wskazują na kontynuację wzrostu temperatury globalnej, co jest zgodne z obecnym konsensusem naukowym dotyczącym zmian klimatycznych.
+
+5. Diagnostyka reszt potwierdza poprawność dopasowanych modeli, spełniających założenia białoszumowości i (w przybliżeniu) normalności.
+
+6. Niepewność prognoz rośnie wraz z horyzontem czasowym, co podkreśla potrzebę ostrożnej interpretacji długoterminowych ekstrapolacji.
+
+## Uwagi metodologiczne
+
+**Test ADF**: 
+
+Należy pamiętać, że w teście ADF (szczególnie w implementacji adf.test() w R) hipoteza alternatywna często oznacza stacjonarność względem trendu deterministycznego, a nie pełną stacjonarność wokół stałej. Dlatego wyniki testu ADF należy interpretować z ostrożnością i uzupełniać innymi testami (KPSS). Szeregi temperatur często wykazują cechy niestacjonarności stochastycznej, a nie tylko niestacjonarności deterministycznej. Jeśli ADF po różnicowaniu "przeszedł", to sugeruje, że różnicowanie było bezpieczniejszym wyborem statystycznym.
+
+**Wybór rzędu p**: 
+
+Kryteria AIC i FPE dały spójne wyniki, co potwierdza wiarygodność identyfikacji rzędu modelu. W praktyce warto również rozważyć zasadę parsymonii i wybierać prostsze modele, jeśli różnice w kryteriach są niewielkie.
+
+**Białoszumowość reszt**: 
+
+Test graficzny został zaimplementowany poprawnie, sprawdzając zarówno częstość przekroczeń przedziałów istotności (powinno być około 5\% dla α=0.05), jak i obecność ekstremalnych wartości (reguła 3-sigma).
+
+---
+
+**Koniec sprawozdania**
