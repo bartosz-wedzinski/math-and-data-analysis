@@ -72,4 +72,18 @@ A Deep Learning experiment built with TensorFlow and Keras, focusing on the impa
 * **Performance Evaluation**: Visualized validation accuracy and validation loss trajectories using Matplotlib to assess the generalization capabilities of each technique.
 
 ### Tools:
-* **Python**, `TensorFlow`, `Keras`, `Matplotlib`, `NumPy`.
+* **Python**: `TensorFlow`, `Keras`, `Matplotlib`, `NumPy`.
+
+# Connect4 AlphaBeta Agent
+
+A highly optimized implementation of the Minimax algorithm for the Connect 4 game, engineered to play at a high level of difficulty (depth=7) with near-instant response times.
+
+### Key Highlights & Algorithmic Optimizations:
+* **Minimax with Alpha-Beta Pruning**: Implemented a recursive decision-making tree that trims unpromising branches, drastically reducing the search space.
+* **In-Place State Mutation**: Avoided costly `deepcopy` operations by modifying and reverting the game board matrix in place, ensuring maximum simulation speed.
+* **Local Win Detection**: Optimized terminal state checks by evaluating only the immediate vectors around the most recently dropped piece (rather than scanning the full board).
+* **Heuristic Move Ordering**: Enforced center-to-edge column evaluation, forcing the Alpha-Beta algorithm to discover optimal paths earlier and maximize pruning efficiency.
+* **Depth-Penalized Scoring**: Designed the heuristic engine to prioritize immediate wins over delayed wins, and delayed losses over immediate losses, ensuring natural and strategic gameplay.
+
+### Tools:
+* **Python**: `math`, `copy`.
