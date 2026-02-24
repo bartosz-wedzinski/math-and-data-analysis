@@ -300,7 +300,7 @@ Zastosowanie metody ilorazów jednostajnych dla parametru $r=3$ pozwoliło na po
 
 \newpage
 
-# Estymacja całek metodami Monte Carlo (3 pkt)
+# Estymacja całek metodami Monte Carlo
 
 ## Objętość elipsoidy
 $$
@@ -879,4 +879,5 @@ cat("Błąd standardowy: ", format(final_se, digits = 16), "\n")
 Zastosowana metoda hybrydowa (Stratyfikacja + Lokalne Zmienne Kontrolne) pozwoliła na drastyczne zredukowanie błędu standardowego. W klasycznym Monte Carlo błąd maleje w tempie $1/\sqrt{n}$. Tutaj, dzięki temu, że na mikroskopijnych odcinkach funkcja $f(u)$ jest niemal idealnie przybliżana przez wielomian 3. stopnia, wariancja resztowa jest znikoma. Wynik jest stabilny na poziomie kilkunastu miejsc po przecinku, co w praktyce czyni ten estymator stochastyczny równie precyzyjnym co deterministyczne kwadratury numeryczne dla funkcji gładkich.
 
 Otrzymany błąd jest mniejszy niż precyzja maszynowa, co oznacza, że wariancja Monte Carlo została w praktyce całkowicie wyeliminowana przez dopasowanie wielomianowe.
+
 
